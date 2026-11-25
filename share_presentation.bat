@@ -1,6 +1,8 @@
 @echo off
 title Group 6 AI Web Agent - Public Presentation Host
+cd /d "%~dp0"
 cls
+
 echo ==================================================================
 echo   🌟 Group 6 AI Project - Secure Presentation Link Generator
 echo ==================================================================
@@ -14,15 +16,24 @@ if not exist "bin\cloudflared.exe" (
     echo.
 )
 
-:: Check if server is running on port 8000
-netstat -ano | findstr :8000 >nul
+:: Strictly check if port 8000 is in LISTENING state
+netstat -ano -p tcp | findstr /R /C:" 127\.0\.0\.1:8000 .*LISTENING" /C:" 0\.0\.0\.0:8000 .*LISTENING" >nul
 if %ERRORLEVEL% NEQ 0 (
-    echo [*] Agent server is not running on port 8000.
-    echo [*] Starting web server in a separate window...
-    start "Group 6 Agent Server" cmd /k ".\start_web.bat"
-    timeout /t 3 /nobreak >nul
+    echo [*] Web agent server is not active on port 8000.
+    echo [*] Starting web agent server in a dedicated window...
+    start "Group 6 Agent Server" cmd /k "cd /d ""%~dp0"" && start_web.bat"
+    
+    echo [*] Waiting for server on port 8000 to become ready...
+    :wait_server
+    timeout /t 2 /nobreak >nul
+    netstat -ano -p tcp | findstr /R /C:" 127\.0\.0\.1:8000 .*LISTENING" /C:" 0\.0\.0\.0:8000 .*LISTENING" >nul
+    if %ERRORLEVEL% NEQ 0 (
+        echo [*] Server is booting up... please hold on...
+        goto wait_server
+    )
+    echo [OK] Web agent server is online and listening on port 8000!
 ) else (
-    echo [OK] Local agent server is active on port 8000.
+    echo [OK] Local agent server is already verified active on port 8000.
 )
 
 echo.
