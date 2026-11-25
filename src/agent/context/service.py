@@ -18,7 +18,8 @@ _template_cache: dict[str, str] = {}
 
 def _load_template(filename: str) -> str:
     if filename not in _template_cache:
-        _template_cache[filename] = Path(f'./src/agent/context/prompt/{filename}').read_text(encoding='utf-8')
+        template_path = Path(__file__).parent / 'prompt' / filename
+        _template_cache[filename] = template_path.read_text(encoding='utf-8')
     return _template_cache[filename]
 
 

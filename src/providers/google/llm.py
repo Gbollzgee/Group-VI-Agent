@@ -30,7 +30,7 @@ class ChatGoogle(BaseChatLLM):
 
     def __init__(
         self,
-        model: str = "gemini-2.5-flash",
+        model: str = "gemini-3.8-flash",
         api_key: Optional[str] = None,
         temperature: Optional[float] = None,
         thinking_budget: Optional[int] = None,
@@ -40,7 +40,7 @@ class ChatGoogle(BaseChatLLM):
         Initialize the Google Gemini LLM.
 
         Args:
-            model: The model name to use. Defaults to "gemini-2.5-flash".
+            model: The model name to use. Defaults to "gemini-3.8-flash".
             api_key: Google API key. Falls back to GEMINI_API_KEY or GOOGLE_API_KEY env vars.
             temperature: Sampling temperature.
             thinking_budget: Token budget for extended thinking (Gemini 2.5 models).
@@ -359,11 +359,43 @@ class ChatGoogle(BaseChatLLM):
         google_tools = self._convert_tools(tools) if tools else None
         config = self._build_config(system_instruction, google_tools, structured_output, json_mode)
 
-        response = self.client.models.generate_content(
-            model=self._model,
-            contents=contents,
-            config=config,
-        )
+        candidate_models = [self._model]
+        for fallback in ["gemini-flash-lite-latest", "gemini-3.1-flash-lite", "gemini-3.8-flash", "gemini-3.5-flash", "gemini-flash-latest"]:
+            if fallback not in candidate_models:
+                candidate_models.append(fallback)
+
+        last_exc = None
+        response = None
+        for model_name in candidate_models:
+            for net_attempt in range(3):
+                try:
+                    response = self.client.models.generate_content(
+                        model=model_name,
+                        contents=contents,
+                        config=config,
+                    )
+                    break
+                except Exception as e:
+                    last_exc = e
+                    err_lower = str(e).lower()
+                    is_net = any(k in err_lower for k in ["getaddrinfo", "cannot connect", "connection", "timeout", "network", "ssl"])
+                    is_rate = any(k in err_lower for k in ["503", "unavailable", "429", "demand", "resource_exhausted"])
+                    if is_net and net_attempt < 2:
+                        import time
+                        time.sleep(3)
+                        try:
+                            self.client = genai.Client(api_key=self.api_key)
+                        except Exception:
+                            pass
+                        continue
+                    elif is_rate:
+                        logger.warning(f"Model {model_name} unavailable ({e}), trying fallback...")
+                        break
+                    raise e
+            if response is not None:
+                break
+        if response is None and last_exc:
+            raise last_exc
 
         if structured_output:
             text = self._extract_text(response)
@@ -394,11 +426,42 @@ class ChatGoogle(BaseChatLLM):
         google_tools = self._convert_tools(tools) if tools else None
         config = self._build_config(system_instruction, google_tools, structured_output, json_mode)
 
-        response = await self.client.aio.models.generate_content(
-            model=self._model,
-            contents=contents,
-            config=config,
-        )
+        candidate_models = [self._model]
+        for fallback in ["gemini-flash-lite-latest", "gemini-3.1-flash-lite", "gemini-3.8-flash", "gemini-3.5-flash", "gemini-flash-latest"]:
+            if fallback not in candidate_models:
+                candidate_models.append(fallback)
+
+        last_exc = None
+        response = None
+        for model_name in candidate_models:
+            for net_attempt in range(3):
+                try:
+                    response = await self.client.aio.models.generate_content(
+                        model=model_name,
+                        contents=contents,
+                        config=config,
+                    )
+                    break
+                except Exception as e:
+                    last_exc = e
+                    err_lower = str(e).lower()
+                    is_net = any(k in err_lower for k in ["getaddrinfo", "cannot connect", "connection", "timeout", "network", "ssl"])
+                    is_rate = any(k in err_lower for k in ["503", "unavailable", "429", "demand", "resource_exhausted"])
+                    if is_net and net_attempt < 2:
+                        await asyncio.sleep(3)
+                        try:
+                            self.client = genai.Client(api_key=self.api_key)
+                        except Exception:
+                            pass
+                        continue
+                    elif is_rate:
+                        logger.warning(f"Model {model_name} unavailable ({e}), trying fallback...")
+                        break
+                    raise e
+            if response is not None:
+                break
+        if response is None and last_exc:
+            raise last_exc
 
         if structured_output:
             text = self._extract_text(response)

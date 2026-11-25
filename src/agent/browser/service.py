@@ -158,9 +158,9 @@ class Browser:
                     self._kill_on_port(port)
                     await asyncio.sleep(1.0)
                     self._process = self._launch_process()
-                    await self._wait_for_browser(port=port, timeout=15.0)
+                    await self._wait_for_browser(port=port, timeout=30.0)
                     continue
-                ws_url = await self._fetch_ws_url(f'http://localhost:{port}')
+                ws_url = await self._fetch_ws_url(f'http://127.0.0.1:{port}')
                 self._client = Client(ws_url)
                 self._client.on_disconnect = self._on_browser_disconnected
                 await self._client.__aenter__()
@@ -175,7 +175,9 @@ class Browser:
         return self._client
 
     async def ensure_open(self):
-        if self._client is None:
+        port = self.config.cdp_port
+        if self._client is None or not await self._is_port_responsive(port):
+            self._client = None
             await self.init_browser()
         if not self._sessions:
             await self.init_tabs()
@@ -219,12 +221,12 @@ class Browser:
                 if not await self._is_port_responsive(port):
                     break
         self._process = self._launch_process()
-        await self._wait_for_browser(port=port, timeout=15.0)
+        await self._wait_for_browser(port=port, timeout=30.0)
 
     async def _is_port_responsive(self, port: int) -> bool:
         try:
             async with httpx.AsyncClient() as http:
-                await http.get(f'http://localhost:{port}/json/version', timeout=1.0)
+                await http.get(f'http://127.0.0.1:{port}/json/version', timeout=1.0)
                 return True
         except Exception:
             return False
@@ -232,7 +234,7 @@ class Browser:
     async def _is_correct_browser(self, port: int) -> bool:
         try:
             async with httpx.AsyncClient() as http:
-                resp = await http.get(f'http://localhost:{port}/json/version', timeout=1.0)
+                resp = await http.get(f'http://127.0.0.1:{port}/json/version', timeout=1.0)
                 browser_str = resp.json().get('Browser', '').lower()
             if self.config.resolved_browser() == 'chrome':
                 return 'chrome' in browser_str and 'edg' not in browser_str
@@ -369,7 +371,7 @@ class Browser:
         while asyncio.get_event_loop().time() < deadline:
             try:
                 async with httpx.AsyncClient() as http:
-                    await http.get(f'http://localhost:{port}/json/version', timeout=2.0)
+                    await http.get(f'http://127.0.0.1:{port}/json/version', timeout=2.0)
                     return
             except Exception:
                 await asyncio.sleep(0.5)
@@ -411,8 +413,11 @@ class Browser:
         if not self.config.attach_to_existing:
             try:
                 if self._process:
-                    self._process.terminate()
-                    self._process.wait(timeout=5)
+                    if sys.platform == 'win32':
+                        subprocess.run(['taskkill', '/F', '/T', '/PID', str(self._process.pid)], capture_output=True)
+                    else:
+                        self._process.terminate()
+                        self._process.wait(timeout=5)
             except Exception:
                 try:
                     if self._process:

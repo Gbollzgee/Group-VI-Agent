@@ -21,6 +21,12 @@ class Page:
 
     async def execute_script(self, script: str, truncate: bool = False, repair: bool = False) -> Any:
         sid = self.browser._get_current_session_id()
+        if not sid:
+            sessions = list(self.browser._sessions.values())
+            if sessions:
+                sid = sessions[0]
+        if not sid:
+            return None
         if repair:
             script = self.browser._repair_js(script)
         try:
@@ -33,11 +39,17 @@ class Page:
                     value = value[:20_000] + f'\n... [truncated, total length: {len(value)}]'
                 return value
         except Exception as e:
-            logger.warning('execute_script error: %s', e)
+            logger.debug('execute_script error: %s', e)
         return None
 
     async def get_screenshot(self, full_page: bool = False, save_screenshot: bool = False) -> bytes | None:
         sid = self.browser._get_current_session_id()
+        if not sid:
+            sessions = list(self.browser._sessions.values())
+            if sessions:
+                sid = sessions[0]
+        if not sid:
+            return None
         await asyncio.sleep(0.3)
         try:
             result = await self.browser.send('Page.captureScreenshot', {

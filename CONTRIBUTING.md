@@ -38,8 +38,8 @@ WebAgent requires:
 2. Clone your fork locally:
 
 ```bash
-git clone https://github.com/CursorTouch/Web-Agent.git
-cd web-agent
+git clone <repository-url>
+cd "group 6 agent"
 ```
 
 3. Install the package in development mode:

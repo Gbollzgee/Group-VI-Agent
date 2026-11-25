@@ -1,0 +1,340 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
+    <title>Group 6 AI Project — Goal-Oriented AI Web Agent</title>
+    <link rel="stylesheet" href="/static/style.css?v=4">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&family=JetBrains+Mono:ital,wght@0,400;0,500;0,700;1,400&display=swap" rel="stylesheet">
+</head>
+<body>
+    <!-- Background Animated Canvas for dynamic visual particles -->
+    <canvas id="ambientCanvas"></canvas>
+
+    <div class="app-container">
+        <!-- Top Navigation Bar -->
+        <header class="top-nav">
+            <div class="brand">
+                <div class="brand-icon">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2">
+                        <polygon points="12 2 2 7 12 12 22 7 12 2"></polygon>
+                        <polyline points="2 17 12 22 22 17"></polyline>
+                        <polyline points="2 12 12 17 22 12"></polyline>
+                    </svg>
+                </div>
+                <div class="brand-text">
+                    <div class="brand-row">
+                        <h1 class="project-title">Group 6 AI Project</h1>
+                        <span class="badge-version">v0.3.0</span>
+                    </div>
+                    <p class="project-subtitle">Goal-Oriented AI Web Agent for Intelligent Website Navigation & Task Execution</p>
+                </div>
+            </div>
+
+            <div class="header-status">
+                <div class="status-pill status-online" id="connectionBadge">
+                    <span class="status-dot"></span>
+                    <span class="status-label">Agent Engine Online</span>
+                </div>
+                <div class="status-pill status-model">
+                    <span class="status-dot-gemini"></span>
+                    <span class="status-label">Gemini 3.8 Flash</span>
+                </div>
+                <div class="status-pill status-chrome">
+                    <span class="status-dot-chrome"></span>
+                    <span class="status-label">CDP Bridge Live</span>
+                </div>
+            </div>
+        </header>
+
+        <!-- Main Workspace Grid -->
+        <main class="main-content">
+            <!-- Left Panel: Voice Control & Natural Language Dialog -->
+            <section class="panel left-panel">
+                <!-- Advanced Voice Orb Card -->
+                <div class="voice-card" id="callCard">
+                    <div class="voice-orb-wrapper">
+                        <div class="voice-orb-glow"></div>
+                        <div class="voice-orb-pulse-rings" id="pulseRings">
+                            <span class="ring ring-1"></span>
+                            <span class="ring ring-2"></span>
+                            <span class="ring ring-3"></span>
+                        </div>
+                        
+                        <!-- Reactive Voice Orb -->
+                        <div class="voice-orb" id="voiceOrb" title="Click to start/stop Voice Mode">
+                            <div class="orb-backdrop"></div>
+                            <div class="orb-core">
+                                <svg id="micIcon" class="orb-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                    <path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3z"></path>
+                                    <path d="M19 10v2a7 7 0 0 1-14 0v-2"></path>
+                                    <line x1="12" y1="19" x2="12" y2="22"></line>
+                                </svg>
+                                
+                                <!-- Dynamic Equalizer Waveform -->
+                                <div class="audio-equalizer hidden" id="audioEqualizer">
+                                    <span class="eq-bar bar-1"></span>
+                                    <span class="eq-bar bar-2"></span>
+                                    <span class="eq-bar bar-3"></span>
+                                    <span class="eq-bar bar-4"></span>
+                                    <span class="eq-bar bar-5"></span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="voice-status-block">
+                        <div class="voice-indicator-pill" id="voiceIndicatorPill">
+                            <span class="indicator-dot"></span>
+                            <span id="indicatorText">Voice Mode Standby</span>
+                        </div>
+                        <h2 class="call-heading" id="callStatusHeading">Voice Mode Inactive</h2>
+                        <p class="call-description" id="callStatusSub">Click below to activate hands-free continuous voice commands</p>
+                        
+                        <!-- Live Speech Ticker -->
+                        <div class="live-speech-box" id="liveTranscriptBox">
+                            <span class="transcript-prefix">Live Input:</span>
+                            <span class="transcript-text" id="liveTranscript">Listening for your command...</span>
+                        </div>
+                    </div>
+
+                    <!-- Voice Action Buttons -->
+                    <div class="call-actions">
+                        <button class="btn btn-call-primary" id="btnToggleCall">
+                            <span class="btn-icon">
+                                <svg viewBox="0 0 24 24" fill="currentColor">
+                                    <path d="M20.01 15.38c-1.23 0-2.42-.2-3.53-.56a.977.977 0 00-1.01.24l-1.57 1.97c-2.83-1.35-5.48-3.9-6.89-6.83l1.95-1.66c.27-.28.35-.67.24-1.02-.37-1.11-.56-2.3-.56-3.53 0-.54-.45-.99-.99-.99H4.19C3.65 3 3 3.24 3 3.99 3 13.28 10.73 21 20.01 21c.71 0 .99-.63.99-1.18v-3.45c0-.54-.45-.99-.99-.99z"/>
+                                </svg>
+                            </span>
+                            <span id="callBtnText">Start Voice Mode</span>
+                        </button>
+                        <button class="btn btn-icon-secondary hidden" id="btnMute" title="Mute Microphone">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <line x1="1" y1="1" x2="23" y2="23"></line>
+                                <path d="M9 9v3a3 3 0 0 0 5.12 2.12M15 9.34V4a3 3 0 0 0-5.94-.6"></path>
+                                <path d="M17 16.95A7 7 0 0 1 5 12v-2m14 0v2a7 7 0 0 1-.11 1.23"></path>
+                            </svg>
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Conversation & Presentation Activity Log -->
+                <div class="chat-card">
+                    <div class="chat-card-header">
+                        <div class="card-title-group">
+                            <span class="card-title">Dialogue & Spoken Exchanges</span>
+                            <span class="chip-badge">Conversational AI ➔ Real Action</span>
+                        </div>
+                        <button class="btn-clear-chat" id="btnClearChat" title="Clear Dialogue">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <polyline points="3 6 5 6 21 6"></polyline>
+                                <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
+                            </svg>
+                        </button>
+                    </div>
+
+                    <div class="chat-messages" id="chatMessages">
+                        <div class="message system-msg">
+                            <div class="msg-avatar">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                    <circle cx="12" cy="12" r="10"></circle>
+                                    <polygon points="10 8 16 12 10 16 10 8"></polygon>
+                                </svg>
+                            </div>
+                            <div class="msg-content">
+                                <strong>Group 6 Autonomous Web Agent is ready.</strong> You can speak aloud using Voice Mode above or type your goal below. The agent maintains an active browser session across multiple consecutive instructions.
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Fast Presentation Demo Chips -->
+                    <div class="quick-chips-wrapper">
+                        <span class="chips-label">Demo Prompts:</span>
+                        <div class="quick-chips">
+                            <button class="chip" data-query="check jumia and list price and types of shoes under 50,000">
+                                <span class="chip-icon">👟</span> Jumia Shoes Under ₦50k
+                            </button>
+                            <button class="chip" data-query="open whatsapp">
+                                <span class="chip-icon">💬</span> Open WhatsApp
+                            </button>
+                            <button class="chip" data-query="navigate to jumia website for registration">
+                                <span class="chip-icon">🛒</span> Jumia Registration
+                            </button>
+                            <button class="chip" data-query="search google for latest generative AI developments">
+                                <span class="chip-icon">🔍</span> Search AI News
+                            </button>
+                        </div>
+                    </div>
+
+                    <!-- Natural Language Command Input -->
+                    <div class="input-container">
+                        <div class="input-field-wrapper">
+                            <input type="text" id="textInput" placeholder="Speak above or enter a goal (e.g. 'open whatsapp and start chat')..." autocomplete="off">
+                            <button class="btn-submit" id="btnSend" title="Send Instruction">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+                                    <line x1="22" y1="2" x2="11" y2="13"></line>
+                                    <polygon points="22 2 15 22 11 13 2 9 22 2"></polygon>
+                                </svg>
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Right Panel: 5-Stage Execution Feed & Backstage Drawer -->
+            <section class="panel right-panel">
+                <div class="execution-card">
+                    <!-- Execution Header -->
+                    <div class="execution-header">
+                        <div class="feed-title-block">
+                            <h3 class="feed-title">Agent Execution Feed</h3>
+                            <p class="feed-sub">5-Stage Goal Decomposition & Execution Pipeline</p>
+                        </div>
+                        <div class="feed-status-badge" id="feedStatusBadge">
+                            <span class="live-beacon"></span>
+                            <span id="feedStatusText">IDLE</span>
+                        </div>
+                    </div>
+
+                    <!-- 5-Stage Pipeline Display -->
+                    <div class="stages-pipeline-container" id="stagesContainer">
+                        <!-- Stage 1: Working -->
+                        <div class="stage-card" id="stageWorking" data-stage="working">
+                            <div class="stage-indicator">
+                                <div class="stage-number">1</div>
+                                <div class="stage-spinner hidden"></div>
+                                <div class="stage-check hidden">✓</div>
+                                <div class="stage-cross hidden">✕</div>
+                                <div class="stage-line"></div>
+                            </div>
+                            <div class="stage-content">
+                                <div class="stage-header-row">
+                                    <span class="stage-title">Working</span>
+                                    <span class="stage-badge badge-idle">Ready</span>
+                                </div>
+                                <p class="stage-desc">Initializing autonomous runtime and connecting Chrome CDP session...</p>
+                            </div>
+                        </div>
+
+                        <!-- Stage 2: Processing -->
+                        <div class="stage-card" id="stageProcessing" data-stage="processing">
+                            <div class="stage-indicator">
+                                <div class="stage-number">2</div>
+                                <div class="stage-spinner hidden"></div>
+                                <div class="stage-check hidden">✓</div>
+                                <div class="stage-cross hidden">✕</div>
+                                <div class="stage-line"></div>
+                            </div>
+                            <div class="stage-content">
+                                <div class="stage-header-row">
+                                    <span class="stage-title">Processing</span>
+                                    <span class="stage-badge badge-idle">Standby</span>
+                                </div>
+                                <p class="stage-desc">Interpreting goal, locating target domain, and initiating browser navigation...</p>
+                            </div>
+                        </div>
+
+                        <!-- Stage 3: Analysing -->
+                        <div class="stage-card" id="stageAnalysing" data-stage="analysing">
+                            <div class="stage-indicator">
+                                <div class="stage-number">3</div>
+                                <div class="stage-spinner hidden"></div>
+                                <div class="stage-check hidden">✓</div>
+                                <div class="stage-cross hidden">✕</div>
+                                <div class="stage-line"></div>
+                            </div>
+                            <div class="stage-content">
+                                <div class="stage-header-row">
+                                    <span class="stage-title">Analysing</span>
+                                    <span class="stage-badge badge-idle">Standby</span>
+                                </div>
+                                <p class="stage-desc">Inspecting live page DOM, semantic accessibility tree, and interactive elements...</p>
+                            </div>
+                        </div>
+
+                        <!-- Stage 4: Ready / Preparing to Output Result -->
+                        <div class="stage-card" id="stageReady" data-stage="ready">
+                            <div class="stage-indicator">
+                                <div class="stage-number">4</div>
+                                <div class="stage-spinner hidden"></div>
+                                <div class="stage-check hidden">✓</div>
+                                <div class="stage-cross hidden">✕</div>
+                                <div class="stage-line"></div>
+                            </div>
+                            <div class="stage-content">
+                                <div class="stage-header-row">
+                                    <span class="stage-title">Ready / Preparing Result</span>
+                                    <span class="stage-badge badge-idle">Standby</span>
+                                </div>
+                                <p class="stage-desc">Finalizing interactions, validating page state, and synthesizing response...</p>
+                            </div>
+                        </div>
+
+                        <!-- Stage 5: Display the Result -->
+                        <div class="stage-card stage-card-result" id="stageDisplayResult" data-stage="display_result">
+                            <div class="stage-indicator">
+                                <div class="stage-number">5</div>
+                                <div class="stage-spinner hidden"></div>
+                                <div class="stage-check hidden">✓</div>
+                                <div class="stage-cross hidden">✕</div>
+                            </div>
+                            <div class="stage-content">
+                                <div class="stage-header-row">
+                                    <span class="stage-title">Display the Result</span>
+                                    <span class="stage-badge badge-idle">Standby</span>
+                                </div>
+                                <p class="stage-desc" id="resultDesc">Awaiting task completion to present final output.</p>
+                                
+                                <!-- Active Result Presentation Card -->
+                                <div class="result-presentation-box hidden" id="resultPresentationBox">
+                                    <div class="result-box-header">
+                                        <div class="result-status-tag" id="resultStatusTag">
+                                            <span class="check-circle">✓</span> Task Verified
+                                        </div>
+                                        <span class="result-timestamp" id="resultTimestamp"></span>
+                                    </div>
+                                    <div class="result-body" id="resultBody"></div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Auto-Retry Notice Pill -->
+                    <div class="retry-banner hidden" id="retryBanner">
+                        <span class="retry-spinner"></span>
+                        <span id="retryBannerText">Auto-recovering action without interruption...</span>
+                    </div>
+
+                    <!-- Collapsible Backstage Drawer -->
+                    <div class="backstage-drawer" id="backstageDrawer">
+                        <button class="backstage-toggle-btn" id="btnToggleBackstage">
+                            <div class="btn-left">
+                                <span class="backstage-icon">⚙️</span>
+                                <span class="backstage-label">Backstage Operations & Raw Protocol</span>
+                                <span class="backstage-count" id="backstageCountBadge">0 events</span>
+                            </div>
+                            <span class="drawer-arrow" id="drawerArrow">▲</span>
+                        </button>
+                        <div class="backstage-content hidden" id="backstageContent">
+                            <div class="backstage-toolbar">
+                                <span class="backstage-note">Hidden from main audience view during presentation</span>
+                                <button class="btn-clear-logs" id="btnClearBackstage">Clear</button>
+                            </div>
+                            <div class="backstage-feed" id="backstageFeed">
+                                <div class="backstage-empty">No low-level events logged yet.</div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </section>
+        </main>
+    </div>
+
+    <!-- Audio Beep / Feedback Elements -->
+    <audio id="audioChime" preload="auto"></audio>
+
+    <script src="/static/app.js?v=4"></script>
+</body>
+</html>

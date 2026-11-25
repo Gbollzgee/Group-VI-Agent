@@ -1,14 +1,14 @@
 [project]
-name = "web-use"
+name = "group-6-ai-project"
 version = "0.3.0"
-description = "An AI Agent that automates web browsing tasks."
+description = "Design and Implementation of a Goal-Oriented AI Web Agent for Intelligent Website Navigation and Task Execution"
 authors = [
-    { name = "Jeomon George", email = "jeogeoalukka@gmail.com" }
+    { name = "Group 6 AI Agent" }
 ]
 readme = "README.md"
 license = "MIT"
 license-files = ["LICENSE"]
-requires-python = ">=3.13"
+requires-python = ">=3.11"
 
 dependencies = [
     "anthropic>=0.68.1",

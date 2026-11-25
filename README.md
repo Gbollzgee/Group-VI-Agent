@@ -1,31 +1,36 @@
 <div align="center">
 
-  <h1>🌐 Web-Use</h1>
+  <h1>🌐 Group 6 AI Project</h1>
+  <h3>Design and Implementation of a Goal-Oriented AI Web Agent for Intelligent Website Navigation and Task Execution</h3>
 
-  <a href="https://github.com/Jeomon/Web-Agent/blob/main/LICENSE">
+  <a href="LICENSE">
     <img src="https://img.shields.io/badge/license-MIT-green" alt="License">
   </a>
-  <img src="https://img.shields.io/badge/python-3.12%2B-blue" alt="Python">
+  <img src="https://img.shields.io/badge/python-3.11%2B-blue" alt="Python">
   <img src="https://img.shields.io/badge/Powered%20by-CDP-orange" alt="Powered by CDP">
-  <br>
-
-  <a href="https://x.com/CursorTouch">
-    <img src="https://img.shields.io/badge/follow-%40CursorTouch-1DA1F2?logo=twitter&style=flat" alt="Follow on Twitter">
-  </a>
-  <a href="https://discord.com/invite/Aue9Yj2VzS">
-    <img src="https://img.shields.io/badge/Join%20on-Discord-5865F2?logo=discord&logoColor=white&style=flat" alt="Join us on Discord">
-  </a>
+  <img src="https://img.shields.io/badge/Team-Group%206%20AI%20Agent-purple" alt="Group 6 AI Agent">
 
 </div>
 
 <br>
 
-**Web-Use** is an intelligent autonomous browsing agent, built to seamlessly navigate websites, interact with dynamic content, perform smart searches, download files, and adapt to ever-changing pages — all with minimal effort from you. Powered by advanced LLMs and the Chrome DevTools Protocol, it transforms complex web tasks into streamlined, automated workflows that boost productivity and save time.
+## 📌 Project Overview
+
+- **Project Topic:** Design and Implementation of a Goal-Oriented AI Web Agent for Intelligent Website Navigation and Task Execution
+- **Core Concept:** A user describes a goal in ordinary language, and the AI agent identifies relevant website pages, retrieves information, and performs approved actions within the website.
+- **🚀 The Cool Factor:** Moves from conversational AI towards an AI that can take action.
+
+---
+
+**Group 6 AI Agent** is an intelligent, goal-oriented autonomous browsing agent, built to seamlessly navigate websites, interact with dynamic content, perform smart searches, download files, and execute complex workflows — all guided by natural language instructions. Powered by advanced LLMs (including Google Gemini) and the Chrome DevTools Protocol (CDP), it transforms complex web tasks into streamlined, automated workflows that boost productivity and save time.
 
 ## ✨ Key Features
 
+- **🎙️ Real-Time Voice Call Interface** — Speak continuous web navigation commands hands-free with real-time speech recognition (STT) and conversational spoken feedback (TTS)
+- **🌐 Interactive Web Dashboard** — Sleek dark-mode web application with animated glowing Voice Orb, live audio waveform, and split-screen action timeline
 - **🤖 Autonomous Web Navigation** — Navigate websites, fill forms, and interact with dynamic content without manual intervention
-- **🛠️ Multi-LLM Support** — Works with Anthropic Claude, Google Gemini, OpenAI, Groq, Ollama, Cerebras, Mistral, and more
+- **🔄 Continuous Multi-Tasking** — Stays active across multiple consecutive tasks without restarting the browser or losing connection
+- **🛠️ Multi-LLM Support** — Powered by Google Gemini (`gemini-flash-lite-latest`, `gemini-3.8-flash`) with automatic fallback chains
 - **📸 Vision Capability** — Understands visual content on pages with scroll-aware bounding boxes for accurate element highlighting
 - **🌳 Semantic Tree** — DOM traversal-based tree showing real page structure with roles, ids, classes, and text content
 - **🔗 Web Model Context Protocol (WebMCP)** — Discovers and uses custom tools exposed by websites
@@ -33,7 +38,32 @@
 - **📥 File Operations** — Download files and upload content to forms
 - **🔄 State Awareness** — Maintains understanding of page state to avoid loops and recover from errors
 - **⏱️ Intelligent Waiting** — Handles loading states, animations, and user interactions (CAPTCHA, OTP)
-- **🔐 OAuth 2.0 + PKCE** — Built-in authenticated workflows for OAuth-protected services with persistent token storage
+
+---
+
+## 🚀 Running the Web Application & Voice Interface
+
+You can launch the full Web Dashboard with voice control in one step:
+
+```bash
+# Double-click or run:
+start_web.bat
+```
+Or run directly with python:
+```bash
+.venv\Scripts\python.exe web\server.py
+```
+
+Then open your browser at **`http://localhost:8000`**:
+1. Click **"Start Voice Mode"** to initiate a continuous voice session.
+2. The agent greets you aloud and activates the microphone.
+3. Speak any goal (e.g., *"Open WhatsApp"* or *"Navigate to Jumia for registration"*).
+4. The agent immediately acknowledges aloud: *"Alright, I will open WhatsApp for you on web right now."*
+5. Watch the live execution timeline as Chrome navigates in real time.
+6. Once complete, the agent reports aloud: *"I've opened WhatsApp successfully. What would you like me to do next?"*
+7. Speak your next task right away without pressing any buttons!
+
+---
 
 ---
 
@@ -160,8 +190,8 @@ agent = Agent(
 **Clone the repository:**
 
 ```bash
-git clone https://github.com/CursorTouch/Web-Use.git
-cd Web-Use
+git clone <repository-url>
+cd "group 6 agent"
 ```
 
 **Install dependencies:**
@@ -285,11 +315,9 @@ https://github.com/user-attachments/assets/cb8ad60c-0609-42e3-9fb9-584ad77c4e3a
 
 This project is licensed under MIT License - see the [LICENSE](LICENSE) file for details.
 
-## 🤝 Contributing
+## 🤝 Project Team
 
-Contributions are welcome! Please see [CONTRIBUTING](CONTRIBUTING.md) for setup instructions and development guidelines.
-
-Made with ❤️ by [Jeomon George](https://github.com/Jeomon), [Muhammad Yaseen](https://github.com/mhmdyaseen)
+Developed with ❤️ by **Group 6 AI Agent**.
 
 ---
 

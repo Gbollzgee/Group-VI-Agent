@@ -43,6 +43,7 @@ class Agent(BaseAgent):
         keep_alive: bool = False,
         hooks: list[BaseHook] | None = None,
     ) -> None:
+        self.config = config
         self.browser = Browser(config=config)
         self.hook_runner = Hook([GlowHook()] + (hooks or []))
         self.browser.hooks = self.hook_runner
@@ -188,10 +189,12 @@ class Agent(BaseAgent):
                 except Exception as e:
                     last_error = e
                     error_str = str(e)
-                    is_rate_limit = '429' in error_str or 'rate_limit' in error_str.lower() or 'rate limit' in error_str.lower()
+                    is_rate_limit = any(x in error_str.lower() for x in ['429', '503', 'unavailable', 'rate_limit', 'rate limit', 'demand', 'resource_exhausted'])
+                    is_network = any(x in error_str.lower() for x in ['getaddrinfo', 'cannot connect', 'connection', 'timeout', 'network', 'ssl'])
                     if attempt < self.state.max_consecutive_failures - 1:
-                        wait_time = 30 if is_rate_limit else 2 ** (attempt + 1)
-                        self.event.emit(AgentEvent(type=EventType.ERROR, data={"step": step, "error": f"LLM call failed, retrying ({attempt + 1}/{self.state.max_consecutive_failures}): {e}"}))
+                        wait_time = 10 if is_rate_limit else (5 if is_network else 2 ** (attempt + 1))
+                        reason = "Rate limit / quota reached" if is_rate_limit else ("Network/DNS connection issue" if is_network else str(e))
+                        self.event.emit(AgentEvent(type=EventType.ERROR, data={"step": step, "error": f"LLM call failed ({reason}), retrying ({attempt + 1}/{self.state.max_consecutive_failures}) in {wait_time}s..."}))
                         await asyncio.sleep(wait_time)
                     else:
                         self.event.emit(AgentEvent(type=EventType.ERROR, data={"step": step, "error": f"All {self.state.max_consecutive_failures} LLM attempts exhausted: {e}"}))
@@ -273,6 +276,12 @@ class Agent(BaseAgent):
     async def ainvoke(self, task: str) -> AgentResult:
         self.state.reset()
         self.state.task = task
+        if self.browser is None:
+            self.browser = Browser(config=self.config)
+            self.browser.hooks = self.hook_runner
+            self.context = Context(session=self.browser)
+            if self.use_web_mcp:
+                self.registry.browser = self.browser
         await self.browser.ensure_open()
         self.registry.add_extension('session', self.browser)
         self.registry.add_extension('llm', self.llm)
@@ -287,15 +296,16 @@ class Agent(BaseAgent):
             await self.hook_runner.on_agent_error(error=error, step=self.state.step, browser=self.browser)
             return AgentResult(is_done=False, error=error)
         finally:
-            await self.close()
+            if not self.keep_alive:
+                await self.close()
 
     def invoke(self, task: str) -> AgentResult:
-        try:
-            loop = asyncio.get_running_loop()
-        except RuntimeError:
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
-        return loop.run_until_complete(self.ainvoke(task))
+        # Reuse a persistent event loop stored on the agent so that browser
+        # connections, asyncio tasks, and state survive across multiple calls.
+        if not hasattr(self, '_event_loop') or self._event_loop is None or self._event_loop.is_closed():
+            self._event_loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(self._event_loop)
+        return self._event_loop.run_until_complete(self.ainvoke(task))
 
     def print_response(self, task: str):
         console = Console()
@@ -306,14 +316,34 @@ class Agent(BaseAgent):
             console.print(f"[red]Error:[/red] {result.error}")
 
     async def close(self):
+        # When keep_alive=True, do NOT close the event (it clears all subscribers)
+        # and do NOT destroy the browser — just leave everything alive for the next task.
+        if self.keep_alive:
+            return  # nothing to do between tasks
         self.event.close()
         try:
-            if self.keep_alive:
-                await self.browser.disconnect()
-            else:
+            if self.browser:
                 await self.browser.close_browser()
         except Exception:
             pass
         finally:
-            pass  # browser closed
             self.browser = None
+
+    async def aclose(self):
+        """Explicitly shut down the browser and agent session."""
+        self.event.close()
+        try:
+            if self.browser:
+                await self.browser.close_browser()
+        except Exception:
+            pass
+        finally:
+            self.browser = None
+
+    def close_session(self):
+        """Synchronously close the agent and the browser when exiting."""
+        loop = getattr(self, '_event_loop', None)
+        if loop is None or loop.is_closed():
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+        loop.run_until_complete(self.aclose())
