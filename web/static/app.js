@@ -95,43 +95,50 @@ class Group6VoiceAgent {
     }
 
     // ==========================================
-    // Continuous Voice Watchdog (Keeps Voice Mode Active Indefinitely)
+    // Continuous Voice Watchdog & Resilient State Control
     // ==========================================
     startContinuousWatchdog() {
         if (this.watchdogInterval) clearInterval(this.watchdogInterval);
         this.watchdogInterval = setInterval(() => {
             if (this.isVoiceCallActive && !this.isTaskRunning && !this.isAgentSpeaking && !this.isMuted) {
-                // Ensure AudioContext is running
+                // Ensure AudioContext is active
                 if (this.audioCtx && this.audioCtx.state === 'suspended') {
-                    this.audioCtx.resume();
+                    this.audioCtx.resume().catch(() => {});
                 }
-                // Ensure recognition is active
+                // Keep SpeechRecognition alive
                 this.safeStartRecognition();
             }
-        }, 1800);
+        }, 1500);
     }
 
     resumeVoiceListening() {
         this.isTaskRunning = false;
         this.isAgentSpeaking = false;
         this.isUserSpeaking = false;
+        this.lastTranscriptFromNative = '';
 
         if (this.isVoiceCallActive && !this.isMuted) {
-            this.setOrbState('listening', 'Voice Mode Active', 'Agent listening. Speak your next goal hands-free...');
-            this.liveTranscript.innerText = 'Listening for your next command...';
-            this.liveTranscriptBox.style.borderColor = 'rgba(0, 240, 255, 0.4)';
-            this.safeStartRecognition();
+            this.setOrbState('listening', 'Voice Mode Active', 'Agent listening. Speak your goal hands-free...');
+            this.liveTranscript.innerText = 'Listening for your voice...';
+            this.liveTranscriptBox.style.borderColor = 'rgba(0, 240, 255, 0.45)';
 
-            // Re-arm media recorder for next turn
+            // Clean recorder state
             if (this.mediaRecorder && this.mediaRecorder.state === 'recording') {
                 try { this.mediaRecorder.stop(); } catch (e) {}
             }
             this.audioChunks = [];
+
+            // Delay recognition start slightly so speaker echo has decayed
+            setTimeout(() => {
+                if (this.isVoiceCallActive && !this.isAgentSpeaking && !this.isTaskRunning && !this.isMuted) {
+                    this.safeStartRecognition();
+                }
+            }, 350);
         }
     }
 
     // ==========================================
-    // MediaStream & Gemini Audio Recorder (Fallback STT)
+    // Dual Audio Pipeline: MediaStream & Gemini Cloud STT
     // ==========================================
     async setupMediaRecorder() {
         try {
@@ -156,7 +163,7 @@ class Group6VoiceAgent {
             const source = this.audioCtx.createMediaStreamSource(this.audioStream);
             this.analyser = this.audioCtx.createAnalyser();
             this.analyser.fftSize = 64;
-            this.analyser.smoothingTimeConstant = 0.6;
+            this.analyser.smoothingTimeConstant = 0.5;
             source.connect(this.analyser);
 
             let mimeType = 'audio/webm';
@@ -168,6 +175,7 @@ class Group6VoiceAgent {
                 }
             }
 
+            this.mediaMimeType = mimeType;
             const options = mimeType ? { mimeType } : {};
             this.mediaRecorder = new MediaRecorder(this.audioStream, options);
 
@@ -178,11 +186,17 @@ class Group6VoiceAgent {
             };
 
             this.mediaRecorder.onstop = async () => {
+                // If native STT already handled this turn or task is already executing, skip
+                if (this.isTaskRunning || this.lastTranscriptFromNative) {
+                    this.audioChunks = [];
+                    return;
+                }
+
                 if (this.audioChunks.length === 0) return;
-                const audioBlob = new Blob(this.audioChunks, { type: mimeType || 'audio/webm' });
+                const audioBlob = new Blob(this.audioChunks, { type: this.mediaMimeType || 'audio/webm' });
                 this.audioChunks = [];
 
-                if (audioBlob.size > 800 && !this.isTaskRunning) {
+                if (audioBlob.size > 1200) {
                     await this.transcribeAudioWithGemini(audioBlob);
                 }
             };
@@ -191,7 +205,8 @@ class Group6VoiceAgent {
         } catch (err) {
             console.error('Microphone stream access error:', err);
             this.callStatusHeading.innerText = 'Microphone Access Required';
-            this.callStatusSub.innerText = 'Please allow microphone access in your browser.';
+            this.callStatusSub.innerText = 'Please click the lock icon in the address bar and allow microphone access.';
+            this.liveTranscript.innerText = 'Microphone permission blocked. Please enable it in browser settings.';
         }
     }
 
@@ -211,29 +226,30 @@ class Group6VoiceAgent {
             const avg = sum / dataArray.length;
             const normalized = Math.min(avg / 128.0, 1.0);
 
-            // Smooth Equalizer Visual
+            // Equalizer Animation (Dynamic Visual Reaction to user's real mic input)
             if (this.audioEqualizer && !this.audioEqualizer.classList.contains('hidden')) {
                 this.eqBars.forEach((bar, idx) => {
                     const val = dataArray[idx % dataArray.length] || 0;
-                    const h = Math.max(6, (val / 255) * 26);
+                    const h = Math.max(6, Math.min(32, (val / 255) * 36));
                     bar.style.height = `${h}px`;
                 });
             }
 
-            // Speech Detection
-            if (normalized > 0.08 && !this.isAgentSpeaking && !this.isMuted && !this.isTaskRunning) {
+            // Sensitive speech threshold (0.02 - reliable across laptop microphones)
+            if (normalized > 0.02 && !this.isAgentSpeaking && !this.isMuted && !this.isTaskRunning) {
                 if (!this.isUserSpeaking) {
                     this.isUserSpeaking = true;
                     this.voiceOrb.classList.add('orb-user-speaking');
                     this.voiceIndicatorPill.className = 'voice-indicator-pill indicator-speaking';
                     this.indicatorText.innerText = 'Voice Detected — Listening';
                     this.liveTranscript.innerText = 'Listening to your voice...';
-                    this.liveTranscriptBox.style.borderColor = 'rgba(0, 240, 255, 0.45)';
+                    this.liveTranscriptBox.style.borderColor = 'rgba(0, 240, 255, 0.6)';
 
-                    if (this.useCloudSTTFallback && this.mediaRecorder && this.mediaRecorder.state === 'inactive') {
+                    // Start background audio buffering for Gemini STT fallback
+                    if (this.mediaRecorder && this.mediaRecorder.state === 'inactive') {
                         this.audioChunks = [];
                         try {
-                            this.mediaRecorder.start();
+                            this.mediaRecorder.start(250);
                         } catch (e) {}
                     }
                 }
@@ -241,7 +257,7 @@ class Group6VoiceAgent {
                 clearTimeout(this.silenceTimer);
                 this.silenceTimer = setTimeout(() => {
                     this.handleSpeechSilence();
-                }, 1000);
+                }, 1100);
             }
 
             this.audioAnimId = requestAnimationFrame(checkVolume);
@@ -255,19 +271,23 @@ class Group6VoiceAgent {
         this.isUserSpeaking = false;
         this.voiceOrb.classList.remove('orb-user-speaking');
 
-        if (!this.isAgentSpeaking) {
+        if (!this.isAgentSpeaking && !this.isTaskRunning) {
             this.voiceIndicatorPill.className = 'voice-indicator-pill indicator-listening';
             this.indicatorText.innerText = 'Processing speech...';
         }
 
+        // Stop media recorder to trigger transcription if native STT hasn't fired
         if (this.mediaRecorder && this.mediaRecorder.state === 'recording') {
             try { this.mediaRecorder.stop(); } catch (e) {}
         }
     }
 
     async transcribeAudioWithGemini(audioBlob) {
+        if (this.isTaskRunning || this.lastTranscriptFromNative) return;
         try {
             this.liveTranscript.innerText = 'Transcribing voice via Gemini AI...';
+            this.liveTranscriptBox.style.borderColor = 'rgba(99, 102, 241, 0.7)';
+            
             const response = await fetch('/api/transcribe', {
                 method: 'POST',
                 headers: { 'Content-Type': audioBlob.type || 'audio/webm' },
@@ -276,7 +296,7 @@ class Group6VoiceAgent {
 
             if (!response.ok) return;
             const data = await response.json();
-            if (data.success && data.text && data.text.trim().length > 2) {
+            if (data.success && data.text && data.text.trim().length > 1) {
                 const query = data.text.trim();
                 this.lastSpokenText = query;
                 this.liveTranscript.innerText = `"${query}"`;
@@ -288,12 +308,14 @@ class Group6VoiceAgent {
             }
         } catch (err) {
             console.error('Gemini transcription failed:', err);
-            this.resumeVoiceListening();
+            if (this.isVoiceCallActive && !this.isTaskRunning) {
+                this.resumeVoiceListening();
+            }
         }
     }
 
     // ==========================================
-    // Web Speech API (Parallel STT Option)
+    // Web Speech API (Parallel Fast STT)
     // ==========================================
     initSpeechRecognition() {
         const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
@@ -306,7 +328,7 @@ class Group6VoiceAgent {
 
         this.recognition.onstart = () => {
             if (this.isVoiceCallActive && !this.isAgentSpeaking && !this.isTaskRunning) {
-                this.setOrbState('listening', 'Voice Mode Active', 'Agent listening. Speak your goal aloud...');
+                this.setOrbState('listening', 'Voice Mode Active', 'Agent listening. Speak your goal hands-free...');
             }
         };
 
@@ -327,31 +349,34 @@ class Group6VoiceAgent {
             const candidate = (finalStr || interim).trim();
             if (candidate) {
                 this.liveTranscript.innerText = `"${candidate}"`;
-                this.liveTranscriptBox.style.borderColor = 'rgba(0, 240, 255, 0.4)';
+                this.liveTranscriptBox.style.borderColor = 'rgba(0, 240, 255, 0.55)';
 
                 if (candidate.length > 2) {
                     clearTimeout(this.speechDebounceTimer);
                     this.speechDebounceTimer = setTimeout(() => {
                         if (!this.isTaskRunning && !this.isAgentSpeaking && candidate.length > 2) {
+                            this.lastTranscriptFromNative = candidate;
                             this.lastSpokenText = candidate;
                             this.submitTask(candidate, true);
                         }
-                    }, 850);
+                    }, 800);
                 }
             }
 
             if (finalStr.trim().length > 2) {
                 clearTimeout(this.speechDebounceTimer);
                 const query = finalStr.trim();
+                this.lastTranscriptFromNative = query;
                 this.lastSpokenText = query;
                 this.submitTask(query, true);
             }
         };
 
         this.recognition.onerror = (event) => {
-            console.warn('SpeechRecognition browser event:', event.error);
-            if (['network', 'audio-capture', 'service-not-allowed'].includes(event.error)) {
-                this.useCloudSTTFallback = true;
+            console.warn('SpeechRecognition event:', event.error);
+            if (event.error === 'not-allowed') {
+                this.callStatusHeading.innerText = 'Microphone Blocked';
+                this.callStatusSub.innerText = 'Please click the icon in browser address bar and allow microphone.';
             }
         };
 
@@ -367,7 +392,7 @@ class Group6VoiceAgent {
         try {
             this.recognition.start();
         } catch (e) {
-            // Already active
+            // Already started or busy
         }
     }
 
@@ -375,13 +400,11 @@ class Group6VoiceAgent {
         if (!this.recognition) return;
         try {
             this.recognition.stop();
-        } catch (e) {
-            // Ignored
-        }
+        } catch (e) {}
     }
 
     // ==========================================
-    // Speech Synthesis (Agent Spoken Feedback)
+    // Speech Synthesis (Agent Voice Feedback with Anti-Freeze)
     // ==========================================
     initSpeechSynthesis() {
         if (!('speechSynthesis' in window)) return;
@@ -390,7 +413,7 @@ class Group6VoiceAgent {
             const voices = this.speechSynthesis.getVoices();
             if (!voices || voices.length === 0) return;
             this.selectedVoice = voices.find(v =>
-                v.lang.startsWith('en') && (v.name.includes('Natural') || v.name.includes('Google') || v.name.includes('Samantha') || v.name.includes('Jenny'))
+                v.lang.startsWith('en') && (v.name.includes('Natural') || v.name.includes('Google') || v.name.includes('Samantha') || v.name.includes('Jenny') || v.name.includes('David'))
             ) || voices.find(v => v.lang.startsWith('en')) || voices[0];
         };
 
@@ -407,6 +430,12 @@ class Group6VoiceAgent {
             return;
         }
 
+        // Completely silence mic recognition so AI does not hear itself
+        this.safeStopRecognition();
+        if (this.mediaRecorder && this.mediaRecorder.state === 'recording') {
+            try { this.mediaRecorder.stop(); } catch (e) {}
+        }
+        this.audioChunks = [];
         this.speechSynthesis.cancel();
         clearTimeout(this.speakFallbackTimer);
 
@@ -423,16 +452,30 @@ class Group6VoiceAgent {
         this.voiceIndicatorPill.className = 'voice-indicator-pill indicator-speaking';
         this.indicatorText.innerText = 'Agent Speaking Aloud';
 
+        // Chrome on Windows anti-freeze watchdog
+        const keepAliveInterval = setInterval(() => {
+            if (this.speechSynthesis && this.speechSynthesis.speaking) {
+                this.speechSynthesis.pause();
+                this.speechSynthesis.resume();
+            } else {
+                clearInterval(keepAliveInterval);
+            }
+        }, 2500);
+
         const finishSpeaking = () => {
+            clearInterval(keepAliveInterval);
             clearTimeout(this.speakFallbackTimer);
             this.isAgentSpeaking = false;
             this.voiceOrb.classList.remove('orb-ai-speaking');
-            this.resumeVoiceListening();
-            if (onComplete) onComplete();
+            
+            // Re-arm listening with buffer so speaker audio finishes decaying
+            setTimeout(() => {
+                this.resumeVoiceListening();
+                if (onComplete) onComplete();
+            }, 400);
         };
 
-        // Safety fallback timer: guarantees voice mode returns even if Chrome speech hangs
-        const estimatedSeconds = Math.max(3, Math.min(15, (text.split(' ').length / 2.5)));
+        const estimatedSeconds = Math.max(3, Math.min(20, (text.split(' ').length / 2.2)));
         this.speakFallbackTimer = setTimeout(finishSpeaking, estimatedSeconds * 1000);
 
         utterance.onend = finishSpeaking;
