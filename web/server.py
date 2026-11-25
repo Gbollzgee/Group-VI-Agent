@@ -30,6 +30,35 @@ logging.basicConfig(level=logging.INFO)
 # Generous execution timeout (3 minutes) to allow deep searching without hanging indefinitely
 TASK_TIMEOUT_SECONDS = 180.0
 
+FALLBACK_MODELS = [
+    "gemini-flash-lite-latest",
+    "gemini-3.5-flash-lite",
+    "gemini-3.1-flash-lite",
+    "gemini-3.8-flash",
+]
+
+
+async def gemini_generate_with_fallback(client, contents, models=None) -> str:
+    """Generate content from Gemini with resilient fallback across multiple models."""
+    if models is None:
+        models = FALLBACK_MODELS
+    last_err = None
+    for model_name in models:
+        try:
+            res = await asyncio.to_thread(
+                client.models.generate_content,
+                model=model_name,
+                contents=contents,
+            )
+            if res and res.text:
+                return res.text.strip()
+        except Exception as e:
+            logger.warning(f"Model '{model_name}' encountered error: {e}. Attempting next fallback model...")
+            last_err = e
+            continue
+    raise RuntimeError(f"All Gemini fallback models exhausted. Last error: {last_err}")
+
+
 
 class WebAgentManager:
     """
@@ -176,12 +205,8 @@ class WebAgentManager:
                 "Respond ONLY with valid JSON: "
                 "{\"intent\": \"DEEP_SEARCH\" | \"BROWSER_ACTION\" | \"DIRECT_ANSWER\", \"target_site\": \"site_or_none\", \"search_topic\": \"topic\", \"ack\": \"short spoken ack\"}"
             )
-            response = await asyncio.to_thread(
-                client.models.generate_content,
-                model="gemini-flash-lite-latest",
-                contents=prompt
-            )
-            text = response.text.strip()
+            text = await gemini_generate_with_fallback(client, prompt)
+            text = text.strip()
             text = re.sub(r"^```json\s*", "", text, flags=re.IGNORECASE)
             text = re.sub(r"^```\s*", "", text)
             text = re.sub(r"\s*```$", "", text).strip()
@@ -248,12 +273,9 @@ class WebAgentManager:
             "5. Do NOT include placeholder links or broken markdown."
         )
 
-        response = await asyncio.to_thread(
-            client.models.generate_content,
-            model="gemini-flash-lite-latest",
-            contents=prompt
-        )
-        content = response.text.strip() if response and response.text else "Information extracted successfully."
+        content = await gemini_generate_with_fallback(client, prompt)
+        if not content:
+            content = "Information extracted successfully."
 
         # Stage 4: Ready
         await self.broadcast({
@@ -315,12 +337,9 @@ class WebAgentManager:
             f"You are the Group 6 AI Project assistant. Provide an authoritative, high-clarity presentation-grade response to:\n\"{query}\"\n\n"
             "Format with clean Markdown: include bullet points, bold key terms, and an executive summary."
         )
-        response = await asyncio.to_thread(
-            client.models.generate_content,
-            model="gemini-flash-lite-latest",
-            contents=prompt
-        )
-        content = response.text.strip() if response and response.text else "Response synthesized."
+        content = await gemini_generate_with_fallback(client, prompt)
+        if not content:
+            content = "Response synthesized."
 
         # Stage 4: Ready
         await self.broadcast({
@@ -354,9 +373,7 @@ class WebAgentManager:
             if not self.agent.browser:
                 self.agent.browser = Browser(config=self.config)
             await self.agent.browser.ensure_open()
-            tab = await self.agent.browser.get_current_tab()
-            if tab:
-                await tab.navigate(url)
+            await self.agent.browser.navigate(url)
         except Exception as e:
             logger.debug(f"Background navigation note: {e}")
 
@@ -502,13 +519,7 @@ async def transcribe_handler(request):
             "If the audio is silent or only contains ambient room noise, return EMPTY."
         )
 
-        response = await asyncio.to_thread(
-            client.models.generate_content,
-            model="gemini-flash-lite-latest",
-            contents=[part, prompt]
-        )
-
-        text = response.text.strip() if response and response.text else ""
+        text = await gemini_generate_with_fallback(client, [part, prompt])
         if text.upper() == "EMPTY" or text == '""' or text == "''":
             text = ""
 
