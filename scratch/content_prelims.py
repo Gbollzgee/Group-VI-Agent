@@ -1,0 +1,19 @@
+# Preliminary Pages Content & Data
+MEMBERS = [
+    ("1", "Olanrewaju Gbolahan", "2403030050"),
+    ("2", "Akinsanmi Cole Akintola", "2403030001"),
+    ("3", "Coker Michael Oluwamayomikun", "2403030030"),
+    ("4", "Adewale Marvellous Elizabeth", "2403010002"),
+    ("5", "Oluwanishola Samuel Olajide", "2303030070"),
+    ("6", "Israel Richard Oluwatoyin", "2403030035"),
+    ("7", "Amudipe Emmanuel Olayemi", "2403030022")
+]
+
+PROJECT_TITLE = "DESIGN AND IMPLEMENTATION OF A GOAL ORIENTED AI WEB AGENT FOR INTELLIGENT WEBSITE NAVIGATION AND TASK EXECUTION"
+COURSE_CODE = "CSC 309"
+COURSE_TITLE = "ARTIFICIAL INTELLIGENCE"
+DEPARTMENT = "DEPARTMENT OF COMPUTER SCIENCE AND BIOCHEMISTRY"
+INSTITUTION = "JOSEPH AYO BABALOLA UNIVERSITY"
+LOCATION = "IKEJI-ARAKEJI, OSUN STATE, NIGERIA"
+LECTURER = "MR A.T. OLUMIDE"
+DATE_STR = "NOVEMBER 2026"
