@@ -1,6 +1,6 @@
 # Preliminary Pages Content & Data
 MEMBERS = [
-    ("1", "Olanrewaju Gbolahan", "2403030050"),
+    ("1", "Olanrewaju Gbolahan Olamide", "2403030050"),
     ("2", "Akinsanmi Cole Akintola", "2403030001"),
     ("3", "Coker Michael Oluwamayomikun", "2403030030"),
     ("4", "Adewale Marvellous Elizabeth", "2403010002"),

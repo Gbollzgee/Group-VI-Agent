@@ -16,7 +16,7 @@ CHAPTER_3_DATA = {
         ]),
         ("3.3 Team Organization and Workflow", [
             "To successfully execute a project of this architectural complexity within the academic term, Group 6 established a rigorous agile software engineering workflow. The project members were assigned specialized functional roles aligning with their individual technical competencies within Computer Science and Biochemistry:",
-            "1. Olanrewaju Gbolahan (Matric No: 2403030050) — Project Lead & Full-Stack Systems Architect. Owned the core WebAgentManager orchestration, aiohttp server architecture, WebSocket synchronization protocol, and end-to-end integration.",
+            "1. Olanrewaju Gbolahan Olamide (Matric No: 2403030050) — Project Lead & Full-Stack Systems Architect. Owned the core WebAgentManager orchestration, aiohttp server architecture, WebSocket synchronization protocol, and end-to-end integration.",
             "2. Akinsanmi Cole Akintola (Matric No: 2403030001) — Browser Automation & CDP Specialist. Responsible for Chrome DevTools Protocol instrumentation, DOM state extraction, synthetic hardware event dispatching, and navigation error recovery.",
             "3. Coker Michael Oluwamayomikun (Matric No: 2403030030) — AI Intent & LLM Prompt Engineer. Designed the Smart Intent Classification heuristics, Gemini prompt templates, JSON response extraction parsers, and multi-model fallback routines.",
             "4. Adewale Marvellous Elizabeth (Matric No: 2403010002) — Voice Systems & Audio Processing Engineer. Implemented the Web Audio API equalizer visualizer, dual-engine SpeechRecognition pipeline, audio blob chunking, and microphone permission management.",
