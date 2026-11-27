@@ -285,7 +285,7 @@ class Group6VoiceAgent {
     async transcribeAudioWithGemini(audioBlob) {
         if (this.isTaskRunning || this.lastTranscriptFromNative) return;
         try {
-            this.liveTranscript.innerText = 'Transcribing voice via Gemini AI...';
+            this.liveTranscript.innerText = 'Transcribing voice input...';
             this.liveTranscriptBox.style.borderColor = 'rgba(99, 102, 241, 0.7)';
             
             const response = await fetch('/api/transcribe', {
@@ -1052,6 +1052,11 @@ function escapeHtml(text) {
 function formatMarkdownBasic(text) {
     if (!text) return '';
 
+    // Handle Code Blocks first
+    text = text.replace(/```([a-zA-Z0-9]*)\r?\n([\s\S]*?)```/g, (match, lang, code) => {
+        return `<pre class="code-block"><code class="language-${lang}">${escapeHtml(code.trim())}</code></pre>`;
+    });
+
     // Handle Markdown Tables
     const tableRegex = /((?:\|.+?\|\r?\n)+)/g;
     let formatted = text.replace(tableRegex, (match) => {
@@ -1090,6 +1095,8 @@ function formatMarkdownBasic(text) {
                     if (/[₦$€£]|\bNGN\b/i.test(cellVal)) {
                         cellVal = `<span class="price-highlight">${cellVal}</span>`;
                     }
+                    // Handle markdown links inside table cells
+                    cellVal = cellVal.replace(/\[(.*?)\]\((https?:\/\/[^\s\)]+)\)/g, '<a href="$2" target="_blank" rel="noopener noreferrer" class="verified-ext-link">$1 ↗</a>');
                     tableHtml += `<td>${cellVal}</td>`;
                 });
                 tableHtml += '</tr>';
@@ -1098,6 +1105,12 @@ function formatMarkdownBasic(text) {
         tableHtml += '</tbody></table></div>';
         return tableHtml;
     });
+
+    // Handle Images: ![alt](url)
+    formatted = formatted.replace(/!\[(.*?)\]\((https?:\/\/[^\s\)]+)\)/g, '<div class="img-preview-box"><img src="$2" alt="$1" class="product-verified-img" loading="lazy"><span class="img-caption">$1</span></div>');
+
+    // Handle Links: [text](url)
+    formatted = formatted.replace(/\[(.*?)\]\((https?:\/\/[^\s\)]+)\)/g, '<a href="$2" target="_blank" rel="noopener noreferrer" class="verified-ext-link">$1 ↗</a>');
 
     // Headers
     formatted = formatted.replace(/^### (.*$)/gim, '<h4 class="md-h4">$1</h4>');

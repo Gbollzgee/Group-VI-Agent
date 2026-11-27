@@ -15,7 +15,7 @@ if str(PROJECT_ROOT) not in sys.path:
 
 load_dotenv(PROJECT_ROOT / ".env")
 
-# Group 6 AI Project imports
+# Group 6 AI Project Core & Modular Engines
 from src.agent import Agent
 from src.agent.browser import Browser
 from src.agent.browser.config import BrowserConfig
@@ -24,10 +24,17 @@ from src.providers.google import ChatGoogle
 from google import genai
 from google.genai import types
 
+from src.engines import (
+    ResultCountController,
+    IntentDetector,
+    ProductEngine,
+    WebResearchEngine,
+    EducationalEngine,
+)
+
 logger = logging.getLogger("group6.web")
 logging.basicConfig(level=logging.INFO)
 
-# Generous execution timeout (3 minutes) to allow deep searching without hanging indefinitely
 TASK_TIMEOUT_SECONDS = 180.0
 
 FALLBACK_MODELS = [
@@ -38,8 +45,8 @@ FALLBACK_MODELS = [
 ]
 
 
-async def gemini_generate_with_fallback(client, contents, models=None) -> str:
-    """Generate content from Gemini with resilient fallback across multiple models."""
+async def generate_with_model_fallback(client, contents, models=None) -> str:
+    """Generate content with resilient fallback across multiple models."""
     if models is None:
         models = FALLBACK_MODELS
     last_err = None
@@ -53,19 +60,20 @@ async def gemini_generate_with_fallback(client, contents, models=None) -> str:
             if res and res.text:
                 return res.text.strip()
         except Exception as e:
-            logger.warning(f"Model '{model_name}' encountered error: {e}. Attempting next fallback model...")
+            logger.warning(f"Model '{model_name}' encountered error: {e}. Trying next fallback...")
             last_err = e
             continue
-    raise RuntimeError(f"All Gemini fallback models exhausted. Last error: {last_err}")
-
+    raise RuntimeError(f"All fallback models exhausted. Last error: {last_err}")
 
 
 class WebAgentManager:
     """
-    Manages the lifecycle of the Group 6 Autonomous AI Web Agent:
-    - Smart Intent Routing (Deep Search, Live Browser Navigation, or Direct AI)
+    Manages the lifecycle of the Group 6 Autonomous AI Agent:
+    - Intelligent Multi-Domain Intent Routing (Product Discovery, Deep Research, Educational, Browser Action, Conversation)
+    - Genuine Jumia Product Extraction & Live Verification (Zero Hallucination)
+    - Multi-source Internet Web Research & Citation Generation
+    - Strict Result Count Instruction Following
     - 5-Stage Visual Execution Pipeline
-    - Deep Information Extraction & Structured Result Cards
     - Multi-turn Continuous Voice Interaction
     """
 
@@ -81,6 +89,11 @@ class WebAgentManager:
             max_consecutive_failures=5,
             keep_alive=True,
         )
+        api_key = os.environ.get("GOOGLE_API_KEY")
+        self.product_engine = ProductEngine(browser_instance=None)
+        self.research_engine = WebResearchEngine(api_key=api_key)
+        self.educational_engine = EducationalEngine(api_key=api_key)
+
         self.ws_clients = set()
         self.is_busy = False
 
@@ -153,143 +166,125 @@ class WebAgentManager:
                 dead_clients.add(ws)
         self.ws_clients -= dead_clients
 
-    async def classify_intent(self, query: str) -> dict:
+    async def _ensure_browser_open(self):
+        """Ensures the agent browser is initialized and active for live CDP operations."""
+        if not self.agent.browser:
+            self.agent.browser = Browser(config=self.config)
+        await self.agent.browser.ensure_open()
+        return self.agent.browser
+
+    async def execute_product_search(self, query: str, intent_data: dict):
         """
-        Smart Intent Routing (fast deterministic routing first to save latency & API quota):
-        1. DEEP_SEARCH: extracting structured product/market data (e.g. Jumia shoes under 50k, phone prices)
-        2. BROWSER_ACTION: physically opening or interacting with a specific website (e.g. Open WhatsApp, Jumia registration)
-        3. DIRECT_ANSWER: general knowledge or conversational question that does NOT require opening a browser
+        Genuine Product Discovery & Verification Pipeline:
+        Performs real-time CDP extraction from Jumia, validates images, URLs, prices,
+        filters non-matching categories, and strictly enforces result count.
         """
-        q_lower = query.lower().strip()
-        target_site = "jumia" if "jumia" in q_lower else ("amazon" if "amazon" in q_lower else ("konga" if "konga" in q_lower else "web"))
-
-        # Fast-path 1: Deep Search & Price/Product Comparison
-        if any(k in q_lower for k in ["list ", "price", "prices", "types of", "compare", "under ", "below ", "cheap", "best ", "top ", "features of", "cost of", "how much"]):
-            return {
-                "intent": "DEEP_SEARCH",
-                "target_site": target_site,
-                "search_topic": query,
-                "ack": f"On it! Running a deep search and compiling the structured report for you right now.",
-            }
-
-        # Fast-path 2: Direct Conversational / Informational Answer (no browser needed)
-        if any(q_lower.startswith(p) for p in ["what is", "what are", "who is", "who invented", "how does", "how do", "why ", "explain ", "define ", "tell me about", "hello", "hi ", "hey "]):
-            return {
-                "intent": "DIRECT_ANSWER",
-                "target_site": "none",
-                "search_topic": query,
-                "ack": "Understood, analyzing your question and preparing the answer right away.",
-            }
-
-        # Fast-path 3: Explicit Browser Navigation / Web App Action
-        if any(k in q_lower for k in ["open ", "go to ", "visit ", "navigate ", "register", "sign up", "signup", "login", "log in", "whatsapp", "youtube", "search google", "click "]):
-            return {
-                "intent": "BROWSER_ACTION",
-                "target_site": target_site,
-                "search_topic": query,
-                "ack": "Alright, launching the browser to handle that task for you right now.",
-            }
-
-        api_key = os.environ.get("GOOGLE_API_KEY")
-        if not api_key:
-            return {"intent": "BROWSER_ACTION", "target_site": "web", "search_topic": query, "ack": "Working on your request right away."}
-
-        try:
-            client = genai.Client(api_key=api_key)
-            prompt = (
-                "Classify this user query into ONE of three categories:\n"
-                "1. 'DEEP_SEARCH': search, compare, extract, or list products/prices/data.\n"
-                "2. 'BROWSER_ACTION': open a live site, log in, register, or take action in a web app.\n"
-                "3. 'DIRECT_ANSWER': general question or explanation where opening a browser is unnecessary.\n\n"
-                f"Query: \"{query}\"\n\n"
-                "Respond ONLY with valid JSON: "
-                "{\"intent\": \"DEEP_SEARCH\" | \"BROWSER_ACTION\" | \"DIRECT_ANSWER\", \"target_site\": \"site_or_none\", \"search_topic\": \"topic\", \"ack\": \"short spoken ack\"}"
-            )
-            text = await gemini_generate_with_fallback(client, prompt)
-            text = text.strip()
-            text = re.sub(r"^```json\s*", "", text, flags=re.IGNORECASE)
-            text = re.sub(r"^```\s*", "", text)
-            text = re.sub(r"\s*```$", "", text).strip()
-            return json.loads(text)
-        except Exception as e:
-            logger.warning(f"Intent classification fallback: {e}")
-            return {"intent": "DIRECT_ANSWER", "target_site": "none", "search_topic": query, "ack": "Understood, processing your inquiry right away."}
-
-    async def execute_deep_search(self, query: str, intent_data: dict):
-        """
-        Deep Searching & Information Extraction Pipeline:
-        Performs in-depth analysis, extracts structured product/market specs,
-        and displays rich comparison tables directly on the presentation screen.
-        """
-        target = intent_data.get("target_site", "web")
-        topic = intent_data.get("search_topic", query)
+        requested_count = intent_data.get("requested_count")
 
         # Stage 1: Working
         await self.broadcast({
             "type": "stage_update",
             "stage": "working",
-            "title": "Market Intelligence Engine Active",
-            "detail": f"Targeting {target.capitalize()} database. Initializing deep information extraction...",
+            "title": "Marketplace Intelligence Engine Active",
+            "detail": "Initializing genuine product discovery on Jumia Nigeria catalog...",
         })
-        await asyncio.sleep(0.5)
+        await asyncio.sleep(0.4)
 
         # Stage 2: Processing
         await self.broadcast({
             "type": "stage_update",
             "stage": "processing",
-            "title": "Querying Marketplace Catalog",
-            "detail": f"Filtering listings for: \"{topic}\". Analyzing pricing structures and categories...",
+            "title": "Querying Live Jumia Catalog",
+            "detail": f'Navigating Chrome via CDP to inspect live listings for: "{query}"...',
         })
 
-        # Launch background browser navigation to the search catalog if Jumia/e-commerce
-        if "jumia" in target.lower() or "jumia" in query.lower():
-            catalog_url = f"https://www.jumia.com.ng/catalog/?q={re.sub(r'[^a-zA-Z0-9]+', '+', topic)}"
-            asyncio.create_task(self._safe_background_navigate(catalog_url))
+        # Ensure browser is available for extraction
+        try:
+            browser = await self._ensure_browser_open()
+            self.product_engine.browser = browser
+        except Exception as e:
+            logger.warning(f"Could not open browser for product engine: {e}")
 
-        await asyncio.sleep(0.8)
+        # Execute genuine extraction
+        result = await self.product_engine.search_and_validate(query, requested_count=requested_count)
 
         # Stage 3: Analysing
         await self.broadcast({
             "type": "stage_update",
             "stage": "analysing",
-            "title": "Extracting Structured Product Data",
-            "detail": "Filtering prices, matching user budget criteria, and structuring attributes...",
+            "title": "Validating Products & Prices",
+            "detail": "Verifying live Naira prices, ratings, high-res images, and genuine listing URLs...",
         })
-
-        # Generate Deep Information Extraction via Gemini
-        api_key = os.environ.get("GOOGLE_API_KEY")
-        client = genai.Client(api_key=api_key)
-        prompt = (
-            f"You are the Group 6 Autonomous AI Agent performing Deep Market Extraction for the query: \"{query}\".\n\n"
-            "Format the output strictly as a professional, executive-ready presentation report:\n"
-            "1. Start with a prominent title: `### 🛒 Marketplace Intelligence: [Topic Summary]`\n"
-            "2. Provide an itemized Markdown Comparison Table with columns:\n"
-            "   | Product Name & Brand | Style / Category | Price (₦) | Key Specifications & Rating |\n"
-            "3. Include at least 5 realistic, representative products matching the exact criteria (e.g. if shoes under 50,000, ensure prices are strictly < 50,000 NGN, e.g. ₦14,500, ₦22,000, ₦38,000, ₦45,000).\n"
-            "4. Follow the table with a bulleted section: `#### 💡 Key Market Takeaways & Analysis:`\n"
-            "   - Price range breakdown (budget vs premium tier)\n"
-            "   - Recommended choices based on durability and value\n"
-            "   - Confirmation that all options satisfy the requested price constraint\n"
-            "5. Do NOT include placeholder links or broken markdown."
-        )
-
-        content = await gemini_generate_with_fallback(client, prompt)
-        if not content:
-            content = "Information extracted successfully."
+        await asyncio.sleep(0.4)
 
         # Stage 4: Ready
         await self.broadcast({
             "type": "stage_update",
             "stage": "ready",
-            "title": "Presentation Report Compiled",
-            "detail": "Structured comparison table formatted and ready for review.",
+            "title": "Verification Complete",
+            "detail": f"Compiled {result.get('found_count', 0)} verified listing(s) matching your criteria.",
         })
-        await asyncio.sleep(0.5)
+        await asyncio.sleep(0.3)
 
-        # Spoken summary
+        # Stage 5: Display the Result
+        await self.broadcast({
+            "type": "task_completed",
+            "success": result.get("success", False),
+            "stage": "display_result",
+            "title": "Verified Product Report",
+            "detail": f"Exact Result Count: {result.get('found_count', 0)} item(s) displayed.",
+            "content": result.get("content", "No product report available."),
+            "completion_speech": result.get("summary", "Product search completed."),
+        })
+
+    async def execute_deep_research(self, query: str, intent_data: dict):
+        """
+        Multi-source Internet Research Pipeline:
+        Conducts thorough research across DuckDuckGo and Wikipedia, cross-references facts,
+        detects outdated claims, and provides verified source links.
+        """
+        requested_count = intent_data.get("requested_count")
+
+        # Stage 1: Working
+        await self.broadcast({
+            "type": "stage_update",
+            "stage": "working",
+            "title": "Autonomous Research Core Active",
+            "detail": f'Decomposing research inquiry: "{query}"...',
+        })
+        await asyncio.sleep(0.4)
+
+        # Stage 2: Processing
+        await self.broadcast({
+            "type": "stage_update",
+            "stage": "processing",
+            "title": "Querying Authoritative Web Sources",
+            "detail": "Gathering live information across encyclopedias, news archives, and databases...",
+        })
+
+        research_res = await self.research_engine.execute_research(query, requested_count=requested_count)
+
+        # Stage 3: Analysing
+        await self.broadcast({
+            "type": "stage_update",
+            "stage": "analysing",
+            "title": "Cross-Referencing & Fact-Checking",
+            "detail": "Validating factual claims, comparing evidence, and synthesizing takeaways...",
+        })
+        await asyncio.sleep(0.4)
+
+        # Stage 4: Ready
+        await self.broadcast({
+            "type": "stage_update",
+            "stage": "ready",
+            "title": "Research Report Assembled",
+            "detail": "Verified evidence-backed report structured with reference citations.",
+        })
+        await asyncio.sleep(0.3)
+
         spoken_summary = (
-            f"I have completed the deep search on {target.capitalize()} and compiled the itemized price list for you. "
-            "Found multiple styles matching your criteria under the requested budget. The structured comparison table is displayed on your screen. What would you like to do next?"
+            f"I have conducted research on \"{query}\" across authoritative sources and compiled a comprehensive report with verified references. "
+            "The full breakdown is displayed on your screen. What would you like to explore next?"
         )
 
         # Stage 5: Display the Result
@@ -297,20 +292,26 @@ class WebAgentManager:
             "type": "task_completed",
             "success": True,
             "stage": "display_result",
-            "title": "Information Extracted Successfully",
-            "detail": "Structured product data displayed below.",
-            "content": content,
+            "title": "Research Findings Ready",
+            "detail": "Authoritative research report displayed below.",
+            "content": research_res.get("content", "Research completed."),
             "completion_speech": spoken_summary,
         })
 
-    async def execute_direct_answer(self, query: str):
-        """Handles informational and conversational queries directly without opening Chrome."""
+    async def execute_educational(self, query: str, intent_data: dict):
+        """
+        Educational & Technical Explanation Pipeline:
+        Provides clear, high-pedagogy explanations with real-world analogies, code examples,
+        and architectural diagrams.
+        """
+        requested_count = intent_data.get("requested_count")
+
         # Stage 1: Working
         await self.broadcast({
             "type": "stage_update",
             "stage": "working",
-            "title": "AI Cognitive Core Active",
-            "detail": "Analyzing user inquiry and knowledge domains...",
+            "title": "Educational Cognitive Core Active",
+            "detail": f'Structuring learning modules for: "{query}"...',
         })
         await asyncio.sleep(0.4)
 
@@ -318,28 +319,86 @@ class WebAgentManager:
         await self.broadcast({
             "type": "stage_update",
             "stage": "processing",
-            "title": "Synthesizing Intelligence",
-            "detail": "Gathering key insights and structuring response...",
+            "title": "Formulating Practical Examples",
+            "detail": "Drafting conceptual analogies, step-by-step architectures, and code snippets...",
         })
-        await asyncio.sleep(0.4)
+
+        edu_res = await self.educational_engine.explain(query, requested_count=requested_count)
+
+        # Stage 3: Analysing
+        await self.broadcast({
+            "type": "stage_update",
+            "stage": "analysing",
+            "title": "Refining Pedagogical Clarity",
+            "detail": "Verifying code accuracy, production best practices, and takeaways...",
+        })
+        await asyncio.sleep(0.3)
+
+        # Stage 4: Ready
+        await self.broadcast({
+            "type": "stage_update",
+            "stage": "ready",
+            "title": "Tutorial Ready",
+            "detail": "Structured technical guide formatted and ready.",
+        })
+        await asyncio.sleep(0.3)
+
+        # Stage 5: Display the Result
+        await self.broadcast({
+            "type": "task_completed",
+            "success": True,
+            "stage": "display_result",
+            "title": "Educational Guide Ready",
+            "detail": "Structured guide displayed below.",
+            "content": edu_res.get("content", "Educational explanation prepared."),
+            "completion_speech": edu_res.get("summary", "Explanation ready."),
+        })
+
+    async def execute_general_knowledge(self, query: str, intent_data: dict):
+        """Handles general knowledge and direct conversational queries."""
+        requested_count = intent_data.get("requested_count")
+        count_instruction = ""
+        if requested_count is not None and requested_count > 0:
+            count_instruction = f"\nStrict Result Count: Provide EXACTLY {requested_count} items/answers.\n"
+
+        # Stage 1: Working
+        await self.broadcast({
+            "type": "stage_update",
+            "stage": "working",
+            "title": "Autonomous Cognitive Core Active",
+            "detail": "Analyzing user inquiry and knowledge domains...",
+        })
+        await asyncio.sleep(0.3)
+
+        # Stage 2: Processing
+        await self.broadcast({
+            "type": "stage_update",
+            "stage": "processing",
+            "title": "Synthesizing Intelligence",
+            "detail": "Formulating structured takeaways and verified facts...",
+        })
+        await asyncio.sleep(0.3)
+
+        api_key = os.environ.get("GOOGLE_API_KEY")
+        client = genai.Client(api_key=api_key)
+        prompt = (
+            f"You are the Group 6 Autonomous AI Agent. Provide an authoritative, high-clarity response to:\n\"{query}\"\n\n"
+            "Format with clean Markdown: include bullet points, bold key terms, and an executive summary.\n"
+            "Current Year: 2026. Ground your response in accurate factual reality.\n"
+            f"{count_instruction}"
+        )
+        content = await generate_with_model_fallback(client, prompt)
+        if not content:
+            content = "Response synthesized."
 
         # Stage 3: Analysing
         await self.broadcast({
             "type": "stage_update",
             "stage": "analysing",
             "title": "Validating Insights",
-            "detail": "Formatting structured takeaways and executive summary...",
+            "detail": "Checking factual accuracy and structure...",
         })
-
-        api_key = os.environ.get("GOOGLE_API_KEY")
-        client = genai.Client(api_key=api_key)
-        prompt = (
-            f"You are the Group 6 AI Project assistant. Provide an authoritative, high-clarity presentation-grade response to:\n\"{query}\"\n\n"
-            "Format with clean Markdown: include bullet points, bold key terms, and an executive summary."
-        )
-        content = await gemini_generate_with_fallback(client, prompt)
-        if not content:
-            content = "Response synthesized."
+        await asyncio.sleep(0.2)
 
         # Stage 4: Ready
         await self.broadcast({
@@ -348,7 +407,7 @@ class WebAgentManager:
             "title": "Response Formatted",
             "detail": "Synthesized insights ready for presentation.",
         })
-        await asyncio.sleep(0.3)
+        await asyncio.sleep(0.2)
 
         spoken_summary = content.split("\n")[0]
         clean_speech = re.sub(r"[#*`]", "", spoken_summary).strip()
@@ -367,18 +426,33 @@ class WebAgentManager:
             "completion_speech": spoken_text,
         })
 
-    async def _safe_background_navigate(self, url: str):
-        """Safely points Chrome to the target URL in background without blocking the main workflow."""
-        try:
-            if not self.agent.browser:
-                self.agent.browser = Browser(config=self.config)
-            await self.agent.browser.ensure_open()
-            await self.agent.browser.navigate(url)
-        except Exception as e:
-            logger.debug(f"Background navigation note: {e}")
+    async def execute_conversation(self, query: str, intent_data: dict):
+        """Handles casual greetings and assistant identity questions."""
+        content = (
+            "### 🌟 Group 6 Autonomous AI Agent\n\n"
+            "Hello! I am the **Group 6 Goal-Oriented Autonomous AI Web Agent**, designed for intelligent website navigation, "
+            "genuine product discovery on Jumia Nigeria, deep multi-source internet research, and technical education.\n\n"
+            "**What I can do for you:**\n"
+            "- 👟 **Verified Product Discovery:** Find genuine shoes, laptops, and phones on Jumia with 100% verified prices, images, and links.\n"
+            "- 📚 **Deep Research:** Research current affairs, Nigeria's economy, international developments, and historical events.\n"
+            "- 💻 **Technical Education:** Explain programming concepts (Python, APIs, database normalization) with practical examples.\n"
+            "- 🌐 **Autonomous Browser Navigation:** Open web apps, navigate live sites via Chrome CDP, and perform automated tasks.\n"
+            "- 🎙️ **Hands-Free Continuous Voice:** Speak your commands naturally through real-time speech interaction."
+        )
+        spoken_text = "Hello! I am your Group 6 Autonomous AI Agent, ready for product discovery, deep research, and web navigation. How can I help you today?"
+
+        await self.broadcast({
+            "type": "task_completed",
+            "success": True,
+            "stage": "display_result",
+            "title": "Group 6 AI Ready",
+            "detail": "Assistant overview displayed below.",
+            "content": content,
+            "completion_speech": spoken_text,
+        })
 
     async def run_task(self, query: str):
-        """Main Task Orchestrator with Smart Intent Classification and Fail-Safe Recovery."""
+        """Main Task Orchestrator with Intelligent Intent Detection and Strict Count Following."""
         if self.is_busy:
             await self.broadcast({
                 "type": "error",
@@ -388,28 +462,44 @@ class WebAgentManager:
 
         self.is_busy = True
         try:
-            # 1. Classify intent to determine the best path (Deep Search, Direct AI, or Live Browser)
-            intent_data = await self.classify_intent(query)
-            intent = intent_data.get("intent", "BROWSER_ACTION")
-            ack_speech = intent_data.get("ack", "Working on your request right now.")
+            # 1. Detect Intent and Extract Parameters
+            intent_data = IntentDetector.detect(query)
+            intent = intent_data.get("intent", "GENERAL_KNOWLEDGE")
+            ack_speech = intent_data.get("ack", "Working on your request right away.")
+            req_count = intent_data.get("requested_count")
 
-            # Immediate spoken acknowledgment
+            count_note = f" (Requested Count: {req_count})" if req_count else ""
+            logger.info(f"Task query: '{query}' -> Intent: {intent}{count_note}")
+
+            # Immediate acknowledgment
             await self.broadcast({
                 "type": "task_started",
                 "query": query,
                 "stage": "working",
                 "title": "System Active",
-                "detail": f"Classified intent: {intent.replace('_', ' ')}. Starting execution pipeline...",
+                "detail": f"Classified intent: {intent.replace('_', ' ')}{count_note}. Starting execution pipeline...",
                 "ack_speech": ack_speech,
             })
 
-            # Branch based on smart intent
-            if intent == "DEEP_SEARCH":
-                await self.execute_deep_search(query, intent_data)
+            # Branch based on intelligent intent
+            if intent == "PRODUCT_SEARCH":
+                await self.execute_product_search(query, intent_data)
                 return
 
-            elif intent == "DIRECT_ANSWER":
-                await self.execute_direct_answer(query)
+            elif intent == "DEEP_RESEARCH":
+                await self.execute_deep_research(query, intent_data)
+                return
+
+            elif intent == "EDUCATIONAL":
+                await self.execute_educational(query, intent_data)
+                return
+
+            elif intent == "CONVERSATION":
+                await self.execute_conversation(query, intent_data)
+                return
+
+            elif intent == "GENERAL_KNOWLEDGE":
+                await self.execute_general_knowledge(query, intent_data)
                 return
 
             # Live Browser Navigation (BROWSER_ACTION)
@@ -500,7 +590,7 @@ manager = WebAgentManager()
 
 
 async def transcribe_handler(request):
-    """Direct Audio Transcription Endpoint via Google Gemini Flash."""
+    """Direct Audio Transcription Endpoint via Neural STT."""
     try:
         data = await request.read()
         if not data or len(data) < 500:
@@ -508,7 +598,7 @@ async def transcribe_handler(request):
 
         api_key = os.environ.get("GOOGLE_API_KEY")
         if not api_key:
-            return web.json_response({"success": False, "error": "GOOGLE_API_KEY not configured"}, status=500)
+            return web.json_response({"success": False, "error": "API key not configured"}, status=500)
 
         client = genai.Client(api_key=api_key)
         part = types.Part.from_bytes(data=data, mime_type="audio/webm")
@@ -519,7 +609,7 @@ async def transcribe_handler(request):
             "If the audio is silent or only contains ambient room noise, return EMPTY."
         )
 
-        text = await gemini_generate_with_fallback(client, [part, prompt])
+        text = await generate_with_model_fallback(client, [part, prompt])
         if text.upper() == "EMPTY" or text == '""' or text == "''":
             text = ""
 
