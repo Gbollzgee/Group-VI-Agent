@@ -14,17 +14,19 @@ logger = logging.getLogger("group6.research")
 
 class WebResearchEngine:
     """
-    Intelligent Web Research & Source Validation Engine:
+    Universal Web Research, Live Page Reader & Source Validation Engine:
     Conducts live internet research across reliable and authoritative sources
-    (DuckDuckGo, Wikipedia API, Official Gov/News outlets), compares findings,
-    detects obsolete information, and formats evidence-grounded reports with verified source links.
+    (DuckDuckGo, Wikipedia API, Official Gov/Edu/News outlets), navigates and reads
+    actual webpage content (not just snippets), compares findings, detects obsolete
+    information, extracts structured tables/lists, and formats evidence-grounded
+    reports with verified source citations.
     """
 
     def __init__(self, api_key: Optional[str] = None):
         self.api_key = api_key
         self.headers = {
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
-            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+            "User-Agent": "Group6Agent/2.0 (Academic Research AI; csc309@jabu.edu.ng; Windows NT 10.0)",
+            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,application/json,*/*;q=0.8",
             "Accept-Language": "en-US,en;q=0.9",
         }
 
@@ -51,11 +53,13 @@ class WebResearchEngine:
                                 actual_url = raw_href
                         snippet = snip_el.text.strip() if snip_el else ""
                         if actual_url.startswith("http") and not any(ad in actual_url for ad in ["yandex", "bing"]):
+                            domain = urllib.parse.urlparse(actual_url).netloc.replace("www.", "")
                             results.append({
                                 "title": title,
                                 "url": actual_url,
                                 "snippet": snippet,
-                                "source": urllib.parse.urlparse(actual_url).netloc.replace("www.", "")
+                                "source": domain,
+                                "is_authoritative": any(domain.endswith(sfx) for sfx in [".gov", ".gov.ng", ".edu", ".org", ".ac.uk"]) or domain in ["reuters.com", "bbc.com", "aljazeera.com", "bloomberg.com", "who.int", "worldbank.org", "un.org"]
                             })
                         if len(results) >= max_results:
                             break
@@ -76,7 +80,6 @@ class WebResearchEngine:
                     search_items = data.get("query", {}).get("search", [])
                     for item in search_items[:max_results]:
                         title = item.get("title", "")
-                        page_id = item.get("pageid", "")
                         raw_snip = item.get("snippet", "")
                         clean_snip = re.sub(r"<[^>]+>", "", raw_snip).strip()
                         article_url = f"https://en.wikipedia.org/wiki/{urllib.parse.quote(title.replace(' ', '_'))}"
@@ -84,21 +87,47 @@ class WebResearchEngine:
                             "title": f"{title} (Wikipedia)",
                             "url": article_url,
                             "snippet": clean_snip,
-                            "source": "en.wikipedia.org"
+                            "source": "en.wikipedia.org",
+                            "is_authoritative": True
                         })
         except Exception as e:
             logger.warning(f"Wikipedia search error: {e}")
         return results
 
+    async def fetch_page_content(self, url: str, max_chars: int = 2500) -> Optional[str]:
+        """
+        Fetches and extracts clean readable text from an unfamiliar live webpage.
+        Filters out scripts, styles, navigation bars, and headers.
+        """
+        try:
+            async with httpx.AsyncClient(headers=self.headers, timeout=9.0, follow_redirects=True) as client:
+                resp = await client.get(url)
+                if resp.status_code == 200:
+                    soup = BeautifulSoup(resp.text, "html.parser")
+                    # Remove non-content elements
+                    for tag in soup(["script", "style", "nav", "footer", "header", "noscript", "svg", "form"]):
+                        tag.decompose()
+                    
+                    # Extract body text or article content
+                    article = soup.find("article") or soup.find("main") or soup.body
+                    if article:
+                        text = article.get_text(separator="\n", strip=True)
+                        lines = [line.strip() for line in text.split("\n") if len(line.strip()) > 30]
+                        clean_text = "\n".join(lines)
+                        return clean_text[:max_chars]
+        except Exception as e:
+            logger.debug(f"Failed to fetch live content from {url}: {e}")
+        return None
+
     async def execute_research(self, query: str, requested_count: Optional[int] = None) -> Dict[str, Any]:
         """
-        Conducts multi-source research:
-        1. Breaks query into targeted search queries.
-        2. Aggregates results from DuckDuckGo and Wikipedia.
-        3. Cross-references verified facts and synthesizes an authoritative report with source citations.
-        4. Strictly enforces requested item/source count if user specified one.
+        Conducts deep multi-source research:
+        1. Decomposes query into targeted web search tasks.
+        2. Aggregates results concurrently from DuckDuckGo and Wikipedia.
+        3. Deep-dives by reading actual content of top authoritative sources.
+        4. Synthesizes a factual, evidence-backed report with inline citations and links.
+        5. Strictly enforces user-requested result counts.
         """
-        # Formulate search queries
         clean_q = query.strip()
         search_tasks = [
             self.search_duckduckgo(clean_q, max_results=6),
@@ -110,17 +139,41 @@ class WebResearchEngine:
         ddg_results = task_results[0] if isinstance(task_results[0], list) else []
         wiki_results = task_results[1] if isinstance(task_results[1], list) else []
 
-        combined_sources: List[Dict[str, str]] = []
+        # If DDG yielded no results, query Wikipedia with broader terms to ensure solid coverage
+        if not ddg_results and len(wiki_results) < 4:
+            extra_wiki = await self.search_wikipedia(clean_q, max_results=6)
+            wiki_results = extra_wiki
+
+        combined_sources: List[Dict[str, Any]] = []
         seen_urls = set()
         for s in ddg_results + wiki_results:
             if s["url"] not in seen_urls:
                 seen_urls.add(s["url"])
                 combined_sources.append(s)
 
+        # Deep-dive into top 2 non-wikipedia sources to extract live page text
+        deep_fetch_tasks = []
+        deep_fetch_indices = []
+        for i, s in enumerate(combined_sources[:4]):
+            if "wikipedia.org" not in s["url"]:
+                deep_fetch_tasks.append(self.fetch_page_content(s["url"]))
+                deep_fetch_indices.append(i)
+
+        if deep_fetch_tasks:
+            fetched_pages = await asyncio.gather(*deep_fetch_tasks, return_exceptions=True)
+            for idx, page_text in zip(deep_fetch_indices, fetched_pages):
+                if isinstance(page_text, str) and len(page_text) > 100:
+                    combined_sources[idx]["page_content"] = page_text
+
         # Build research synthesis prompt
         sources_context = ""
         for i, s in enumerate(combined_sources[:8], 1):
-            sources_context += f"[{i}] Title: {s['title']}\n    URL: {s['url']}\n    Snippet: {s['snippet']}\n\n"
+            auth_tag = " [Official/Authoritative Source]" if s.get("is_authoritative") else ""
+            sources_context += f"[{i}] Title: {s['title']}{auth_tag}\n    URL: {s['url']}\n    Snippet: {s['snippet']}\n"
+            if s.get("page_content"):
+                sources_context += f"    Extracted Content: {s['page_content'][:400]}...\n\n"
+            else:
+                sources_context += "\n"
 
         count_instruction = ""
         if requested_count is not None and requested_count > 0:
@@ -166,8 +219,8 @@ class WebResearchEngine:
             for s in combined_sources[:(requested_count or 4)]:
                 content += f"- **[{s['title']}]({s['url']})**: {s['snippet']}\n"
 
-        # Apply strict ResultCountController if websites were specifically requested
-        if "website" in query.lower() or "source" in query.lower() or "link" in query.lower():
+        # Apply strict ResultCountController if websites/sources were specifically requested
+        if any(w in query.lower() for w in ["website", "source", "link", "article"]):
             if requested_count:
                 combined_sources = ResultCountController.enforce_count(combined_sources, requested_count)
 

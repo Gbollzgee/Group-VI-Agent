@@ -5,6 +5,7 @@ import os
 import re
 import sys
 from pathlib import Path
+from typing import Optional, Dict, Any, List
 from aiohttp import web
 from dotenv import load_dotenv
 
@@ -27,9 +28,14 @@ from google.genai import types
 from src.engines import (
     ResultCountController,
     IntentDetector,
+    TaskPlanner,
     ProductEngine,
+    UniversalProductEngine,
     WebResearchEngine,
     EducationalEngine,
+    task_memory,
+    evaluation_engine,
+    feedback_store,
 )
 
 logger = logging.getLogger("group6.web")
@@ -176,17 +182,19 @@ class WebAgentManager:
     async def execute_product_search(self, query: str, intent_data: dict):
         """
         Genuine Product Discovery & Verification Pipeline:
-        Performs real-time CDP extraction from Jumia, validates images, URLs, prices,
-        filters non-matching categories, and strictly enforces result count.
+        Performs real-time extraction from live marketplaces (Jumia CDP, Konga, web),
+        validates images, URLs, prices, filters non-matching categories, and strictly enforces result count.
         """
         requested_count = intent_data.get("requested_count")
+        target_mp = intent_data.get("target_marketplace", "jumia")
+        mp_label = "Jumia Nigeria" if target_mp == "jumia" else target_mp.title()
 
         # Stage 1: Working
         await self.broadcast({
             "type": "stage_update",
             "stage": "working",
             "title": "Marketplace Intelligence Engine Active",
-            "detail": "Initializing genuine product discovery on Jumia Nigeria catalog...",
+            "detail": f"Initializing genuine product discovery on {mp_label}...",
         })
         await asyncio.sleep(0.4)
 
@@ -194,8 +202,8 @@ class WebAgentManager:
         await self.broadcast({
             "type": "stage_update",
             "stage": "processing",
-            "title": "Querying Live Jumia Catalog",
-            "detail": f'Navigating Chrome via CDP to inspect live listings for: "{query}"...',
+            "title": f"Querying Live {mp_label} Catalog",
+            "detail": f'Inspecting live verified marketplace listings for: "{query}"...',
         })
 
         # Ensure browser is available for extraction
@@ -206,7 +214,11 @@ class WebAgentManager:
             logger.warning(f"Could not open browser for product engine: {e}")
 
         # Execute genuine extraction
-        result = await self.product_engine.search_and_validate(query, requested_count=requested_count)
+        result = await self.product_engine.search_and_validate(
+            query,
+            requested_count=requested_count,
+            target_marketplace=target_mp,
+        )
 
         # Stage 3: Analysing
         await self.broadcast({
@@ -451,6 +463,19 @@ class WebAgentManager:
             "completion_speech": spoken_text,
         })
 
+    def _check_sensitive_action(self, query: str) -> Optional[str]:
+        """Check if an action is sensitive or consequential requiring explicit authorization."""
+        ql = query.lower()
+        sensitive_patterns = [
+            (r"\b(buy\s+now|purchase\s+now|checkout\s+order|pay\s+for|make\s+payment)\b", "financial transaction or purchase"),
+            (r"\b(delete\s+all|drop\s+database|erase\s+data|remove\s+account)\b", "irreversible data deletion"),
+            (r"\b(send\s+email\s+to|send\s+message\s+to|post\s+tweet|publish\s+content)\b", "public messaging or posting"),
+        ]
+        for pattern, desc in sensitive_patterns:
+            if re.search(pattern, ql) and not any(p in ql for p in ["simulate", "mock", "test", "explain", "how to"]):
+                return desc
+        return None
+
     async def run_task(self, query: str):
         """Main Task Orchestrator with Intelligent Intent Detection and Strict Count Following."""
         if self.is_busy:
@@ -461,7 +486,32 @@ class WebAgentManager:
             return
 
         self.is_busy = True
+        intent = "GENERAL_KNOWLEDGE"
         try:
+            # 0. Safety & Permission Check for Sensitive Actions
+            sensitive_desc = self._check_sensitive_action(query)
+            if sensitive_desc:
+                auth_message = (
+                    f"### 🛡️ User Authorization Required\n\n"
+                    f"**Detected Sensitive Action:** {sensitive_desc.title()}\n\n"
+                    f"In accordance with Group 6 Agent safety protocols, actions involving financial transactions, "
+                    f"data alteration, or external communication require explicit user confirmation before execution.\n\n"
+                    f"- **Task Objective:** \"{query}\"\n"
+                    f"- **Status:** Execution paused pending authorization.\n"
+                    f"- **To Proceed:** Please confirm by re-submitting with 'Authorized: {query}' or manage the credentials directly."
+                )
+                spoken_auth = f"This action involves a {sensitive_desc}. For safety, your authorization is required before I can proceed."
+                await self.broadcast({
+                    "type": "task_completed",
+                    "success": True,
+                    "stage": "display_result",
+                    "title": "Authorization Required",
+                    "content": auth_message,
+                    "completion_speech": spoken_auth,
+                })
+                task_memory.record(query, "AUTHORIZATION_REQUIRED", True, "Paused for user authorization")
+                return
+
             # 1. Detect Intent and Extract Parameters
             intent_data = IntentDetector.detect(query)
             intent = intent_data.get("intent", "GENERAL_KNOWLEDGE")
@@ -484,22 +534,27 @@ class WebAgentManager:
             # Branch based on intelligent intent
             if intent == "PRODUCT_SEARCH":
                 await self.execute_product_search(query, intent_data)
+                task_memory.record(query, intent, True, f"Product discovery completed on {intent_data.get('target_marketplace', 'Jumia')}")
                 return
 
             elif intent == "DEEP_RESEARCH":
                 await self.execute_deep_research(query, intent_data)
+                task_memory.record(query, intent, True, "Deep research and source cross-referencing completed")
                 return
 
             elif intent == "EDUCATIONAL":
                 await self.execute_educational(query, intent_data)
+                task_memory.record(query, intent, True, "Technical explanation and tutorial generated")
                 return
 
             elif intent == "CONVERSATION":
                 await self.execute_conversation(query, intent_data)
+                task_memory.record(query, intent, True, "Conversational interaction")
                 return
 
             elif intent == "GENERAL_KNOWLEDGE":
                 await self.execute_general_knowledge(query, intent_data)
+                task_memory.record(query, intent, True, "General knowledge response synthesized")
                 return
 
             # Live Browser Navigation (BROWSER_ACTION)
@@ -528,6 +583,8 @@ class WebAgentManager:
                     "content": fail_msg,
                     "completion_speech": "Unable to open or complete this task right now. The website took too long to respond. What would you like me to try instead?",
                 })
+                task_memory.record(query, intent, False, "Timeout on target website")
+                evaluation_engine.record_failure(query, intent, "Timeout exceeded 180s", component="browser")
                 return
 
             if result and result.is_done:
@@ -553,6 +610,7 @@ class WebAgentManager:
                     "content": result.content or "Action executed successfully on target website.",
                     "completion_speech": completion_speech,
                 })
+                task_memory.record(query, intent, True, clean_summary)
             else:
                 err = result.error if result and result.error else "Unable to open or complete this task."
                 await self.broadcast({
@@ -564,6 +622,8 @@ class WebAgentManager:
                     "content": f"Unable to open or complete this task: {err}",
                     "completion_speech": "Unable to open or complete this task right now. What would you like me to do next?",
                 })
+                task_memory.record(query, intent, False, str(err))
+                evaluation_engine.record_failure(query, intent, str(err), component="agent_loop")
 
         except Exception as e:
             logger.exception("Task orchestrator error")
@@ -576,6 +636,8 @@ class WebAgentManager:
                 "content": f"Unable to do this task: {str(e)}",
                 "completion_speech": "Unable to do this task due to an execution error. What would you like me to try next?",
             })
+            task_memory.record(query, intent, False, str(e))
+            evaluation_engine.record_failure(query, intent, str(e), component="task_orchestrator")
         finally:
             self.is_busy = False
 
@@ -663,10 +725,39 @@ async def on_cleanup(app):
     await manager.close()
 
 
+async def feedback_handler(request):
+    """Endpoint for user-submitted feedback/corrections."""
+    try:
+        data = await request.json()
+        query = data.get("query", "")
+        issue = data.get("issue", "")
+        expected = data.get("expected", "")
+        severity = data.get("severity", "medium")
+        if not issue:
+            return web.json_response({"success": False, "error": "Issue description required"}, status=400)
+        fb_id = feedback_store.record(query, issue, expected=expected, severity=severity)
+        return web.json_response({"success": True, "feedback_id": fb_id, "message": "Feedback recorded for continuous system evaluation."})
+    except Exception as e:
+        return web.json_response({"success": False, "error": str(e)}, status=500)
+
+
+async def evaluation_handler(request):
+    """Endpoint to inspect recent evaluations, patterns, and unresolved failures."""
+    summary = evaluation_engine.get_summary()
+    unresolved = evaluation_engine.get_unresolved()
+    return web.json_response({
+        "summary": summary,
+        "unresolved_count": len(unresolved),
+        "unresolved": unresolved[:10],
+    })
+
+
 def create_app():
     app = web.Application()
     app.router.add_get("/", index_handler)
     app.router.add_post("/api/transcribe", transcribe_handler)
+    app.router.add_post("/api/feedback", feedback_handler)
+    app.router.add_get("/api/evaluations", evaluation_handler)
     app.router.add_get("/ws", websocket_handler)
     app.router.add_static("/static/", path=STATIC_DIR, name="static")
     app.on_cleanup.append(on_cleanup)
